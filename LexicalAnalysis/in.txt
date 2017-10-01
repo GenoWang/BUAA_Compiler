@@ -1,0 +1,15 @@
+/*start*/ 
+
+begin:			
+	a:=0;
+	b:=1;
+	c:=3;
+	d:=2;
+	if(a=b) then
+		c:=c*d;
+	else if(b-a)
+		c:=(c+1)/d;
+	else
+		c:=(c+1)/d;
+	end
+end			
