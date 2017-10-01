@@ -1,0 +1,10 @@
+﻿  main.cpp
+main.cpp(72): warning C4018: “<”: 有符号/无符号不匹配
+main.cpp(13): warning C4101: “symbol”: 未引用的局部变量
+  正在生成代码
+  1 of 6 functions (16.7%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    0 functions had inline decision re-evaluated but remain unchanged
+  已完成代码的生成
+  LA.vcxproj -> D:\LA\Release\LA.exe
+  LA.vcxproj -> D:\LA\Release\LA.pdb (Full PDB)
