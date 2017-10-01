@@ -1,29 +1,29 @@
 ###附录A  PL/0编译系统源代码
 
-```
+```pascal
 program pl0 ;  { version 1.0 oct.1989 }
 { PL/0 compiler with code generation }
-const norw = 13;          { no. of reserved words }
-      txmax = 100;        { length of identifier table }
-      nmax = 14;          { max. no. of digits in numbers }
-      al = 10;            { length of identifiers }
-      amax = 2047;        { maximum address }
-      levmax = 3;         { maximum depth of block nesting }
-      cxmax = 200;        { size of code array }
+const norw = 13;          { no. of reserved words }{*保留字个数13个*}
+      txmax = 100;        { length of identifier table }{*标识符表长度*}
+      nmax = 14;          { max. no. of digits in numbers }{*数字最大的长度*}
+      al = 10;            { length of identifiers }{*标识符最大长度*}
+      amax = 2047;        { maximum address }{*最大的值/地址？*}
+      levmax = 3;         { maximum depth of block nesting }{*最大嵌套层次*}
+      cxmax = 200;        { size of code array }{*指令数组一次存储的指令数目上限*}
 
 type symbol =
      ( nul,ident,number,plus,minus,times,slash,oddsym,eql,neq,lss,
        leq,gtr,geq,lparen,rparen,comma,semicolon,period,becomes,
        beginsym,endsym,ifsym,thensym,whilesym,dosym,callsym,constsym,
-       varsym,procsym,readsym,writesym );
-     alfa = packed array[1..al] of char;
-     objecttyp = (constant,variable,prosedure);
-     symset = set of symbol;
-     fct = ( lit,opr,lod,sto,cal,int,jmp,jpc,red,wrt ); { functions }
-     instruction = packed record
+       varsym,procsym,readsym,writesym );{*保留字*}单词？
+     alfa = packed array[1..al] of char;{*packed的意思是数组存储的时候忽略对齐，不间断地存储，这样便于读取*}
+     objecttyp = (constant,variable,prosedure);{*变量类型*}
+     symset = set of symbol;{*单词集合*}
+     fct = ( lit,opr,lod,sto,cal,int,jmp,jpc,red,wrt ); { functions }{*定义好的汇编指令*}
+     instruction = packed record{*record记录类型，类似结构体*}
                      f : fct;            { function code }
                      l : 0..levmax;      { level }
-                     a : 0..amax;        { displacement address }
+                     a : 0..amax;        { displacement address }{*参数*}
                    end;
                   {   lit 0, a : load constant a
                       opr 0, a : execute operation a
@@ -37,9 +37,9 @@ type symbol =
                       wrt 0, 0 : write stack-top
                   }
 
-var   ch : char;      { last character read }
-      sym: symbol;    { last symbol read }
-      id : alfa;      { last identifier read }
+var   ch : char;      { last character read }{*最后读取的字符*}
+      sym: symbol;    { last symbol read }{*最后读到的单词*}
+      id : alfa;      { last identifier read }{*最后读到的标识符*}
       num: integer;   { last number read }
       cc : integer;   { character count }
       ll : integer;   { line length }
