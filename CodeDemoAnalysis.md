@@ -15,7 +15,7 @@ type symbol =
      ( nul,ident,number,plus,minus,times,slash,oddsym,eql,neq,lss,
        leq,gtr,geq,lparen,rparen,comma,semicolon,period,becomes,
        beginsym,endsym,ifsym,thensym,whilesym,dosym,callsym,constsym,
-       varsym,procsym,readsym,writesym );{*保留字*}单词？
+       varsym,procsym,readsym,writesym );{*全部单词*}
      alfa = packed array[1..al] of char;{*packed的意思是数组存储的时候忽略对齐，不间断地存储，这样便于读取*}
      objecttyp = (constant,variable,prosedure);{*变量类型*}
      symset = set of symbol;{*单词集合*}
@@ -40,16 +40,16 @@ type symbol =
 var   ch : char;      { last character read }{*最后读取的字符*}
       sym: symbol;    { last symbol read }{*最后读到的单词*}
       id : alfa;      { last identifier read }{*最后读到的标识符*}
-      num: integer;   { last number read }
-      cc : integer;   { character count }
-      ll : integer;   { line length }
-      kk,err: integer;
-      cx : integer;   { code allocation index }
-      line: array[1..81] of char;
+      num: integer;   { last number read }{*最后读到的整数*}
+      cc : integer;   { character count }{*字符的数目*}
+      ll : integer;   { line length }{*读入的一行的长度*}
+      kk,err: integer;{*kk含义不明，err应该是统计出错个数的*}
+      cx : integer;   { code allocation index }{*代码序号*}
+      line: array[1..81] of char;{*存储字符*}
       a : alfa;
-      code : array[0..cxmax] of instruction;
-      word : array[1..norw] of alfa;
-      wsym : array[1..norw] of symbol;
+      code : array[0..cxmax] of instruction;{*200条指令*}
+      word : array[1..norw] of alfa;{*存储的13个保留字*}
+      wsym : array[1..norw] of symbol;{*存储的13个标志*}
       ssym : array[char] of symbol;
       mnemonic : array[fct] of
                    packed array[1..5] of char;
