@@ -7,7 +7,7 @@ const norw = 13;          { no. of reserved words }{*保留字个数13个*}
       txmax = 100;        { length of identifier table }{*标识符表长度*}
       nmax = 14;          { max. no. of digits in numbers }{*数字最大的长度*}
       al = 10;            { length of identifiers }{*标识符最大长度*}
-      amax = 2047;        { maximum address }{*最大的值/地址？*}
+      amax = 2047;        { maximum address }{*相对地址的最大值*}
       levmax = 3;         { maximum depth of block nesting }{*最大嵌套层次*}
       cxmax = 200;        { size of code array }{*指令数组一次存储的指令数目上限*}
 
@@ -15,9 +15,9 @@ type symbol =
      ( nul,ident,number,plus,minus,times,slash,oddsym,eql,neq,lss,
        leq,gtr,geq,lparen,rparen,comma,semicolon,period,becomes,
        beginsym,endsym,ifsym,thensym,whilesym,dosym,callsym,constsym,
-       varsym,procsym,readsym,writesym );{*全部单词*}
+       varsym,procsym,readsym,writesym );{*枚举类型*}
      alfa = packed array[1..al] of char;{*packed的意思是数组存储的时候忽略对齐，不间断地存储，这样便于读取*}
-     objecttyp = (constant,variable,prosedure);{*变量类型*}
+     objecttyp = (constant,variable,prosedure);{*枚举类型*}
      symset = set of symbol;{*单词集合*}
      fct = ( lit,opr,lod,sto,cal,int,jmp,jpc,red,wrt ); { functions }{*定义好的汇编指令*}
      instruction = packed record{*record记录类型，类似结构体*}
@@ -25,36 +25,37 @@ type symbol =
                      l : 0..levmax;      { level }
                      a : 0..amax;        { displacement address }{*参数*}
                    end;
-                  {   lit 0, a : load constant a
-                      opr 0, a : execute operation a
-                      lod l, a : load variable l,a
-                      sto l, a : store variable l,a
-                      cal l, a : call procedure a at level l
-                      int 0, a : increment t-register by a
-                      jmp 0, a : jump to a
-                      jpc 0, a : jump conditional to a
-                      red l, a : read variable l,a
-                      wrt 0, 0 : write stack-top
+                  {   lit 0, a : load constant a{*读取a到栈顶*}
+                      opr 0, a : execute operation a{*执行运算a*}
+                      lod l, a : load variable l,a{*层次差为l，相对地址为a,读取数据到栈顶*}
+                      sto l, a : store variable l,a{*层次差为l，相对地址为a,从栈顶存储数据*}
+                      cal l, a : call procedure a at level l{*调用过程，入口指令为a，层次为l*}
+                      int 0, a : increment t-register by a{*栈顶指针+a*}
+                      jmp 0, a : jump to a{*无条件跳转到a*}
+                      jpc 0, a : jump conditional to a{*有条件跳转到a*}
+                      red l, a : read variable l,a{*读取数据存储到a*}
+                      wrt 0, 0 : write stack-top{*输出栈顶*}
                   }
 
 var   ch : char;      { last character read }{*最后读取的字符*}
-      sym: symbol;    { last symbol read }{*最后读到的单词*}
+      sym: symbol;    { last symbol read }{*最后读到的类型*}
       id : alfa;      { last identifier read }{*最后读到的标识符*}
-      num: integer;   { last number read }{*最后读到的整数*}
-      cc : integer;   { character count }{*字符的数目*}
-      ll : integer;   { line length }{*读入的一行的长度*}
-      kk,err: integer;{*kk含义不明，err应该是统计出错个数的*}
-      cx : integer;   { code allocation index }{*代码序号*}
-      line: array[1..81] of char;{*存储字符*}
-      a : alfa;
+      num: integer;   { last number read }{*最后读到的数字*}
+      cc : integer;   { character count }{*行指针*}
+      ll : integer;   { line length }{*行长度*}
+      kk,err: integer;{*err统计出错个数*}
+      cx : integer;   { code allocation index }{*代码分配指针*}
+      line: array[1..81] of char;{*缓存一行代码*}
+      a : alfa;{*存储类型*}
       code : array[0..cxmax] of instruction;{*200条指令*}
       word : array[1..norw] of alfa;{*存储的13个保留字*}
-      wsym : array[1..norw] of symbol;{*存储的13个标志*}
-      ssym : array[char] of symbol;
+      wsym : array[1..norw] of symbol;{*存储的13个类型*}
+      ssym : array[char] of symbol;{*符号对应的额类型*}
       mnemonic : array[fct] of
-                   packed array[1..5] of char;
+                   packed array[1..5] of char;{*助记符*}
       declbegsys, statbegsys, facbegsys : symset;
-      table : array[0..txmax] of
+      {*分别是 声明开始，表达式开始，项开始 *}
+      table : array[0..txmax] of {*定义符号表*}
                 record
                   name : alfa;
                   case kind: objecttyp of
