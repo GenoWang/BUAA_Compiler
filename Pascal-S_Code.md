@@ -1,824 +1,39 @@
-###附录A  PL/0编译系统源代码
+## PascalS源码阅读
 
 ```pascal
-program pl0 ;  { version 1.0 oct.1989 }
-{ PL/0 compiler with code generation }
-const norw = 13;          { no. of reserved words }{*保留字个数13个*}
-      txmax = 100;        { length of identifier table }{*标识符表长度*}
-      nmax = 14;          { max. no. of digits in numbers }{*数字最大的长度*}
-      al = 10;            { length of identifiers }{*标识符最大长度*}
-      amax = 2047;        { maximum address }{*相对地址的最大值*}
-      levmax = 3;         { maximum depth of block nesting }{*最大嵌套层次*}
-      cxmax = 200;        { size of code array }{*指令数组一次存储的指令数目上限*}
-
-type symbol =
-     ( nul,ident,number,plus,minus,times,slash,oddsym,eql,neq,lss,
-       leq,gtr,geq,lparen,rparen,comma,semicolon,period,becomes,
-       beginsym,endsym,ifsym,thensym,whilesym,dosym,callsym,constsym,
-       varsym,procsym,readsym,writesym );{*枚举类型*}
-     alfa = packed array[1..al] of char;{*packed的意思是数组存储的时候忽略对齐，不间断地存储，这样便于读取*}
-     objecttyp = (constant,variable,prosedure);{*枚举类型*}
-     symset = set of symbol;{*单词集合*}
-     fct = ( lit,opr,lod,sto,cal,int,jmp,jpc,red,wrt ); { functions }{*定义好的汇编指令*}
-     instruction = packed record{*record记录类型，类似结构体*}
-                     f : fct;            { function code }
-                     l : 0..levmax;      { level }
-                     a : 0..amax;        { displacement address }{*参数*}
-                   end;
-                  {   lit 0, a : load constant a{*读取a到栈顶*}
-                      opr 0, a : execute operation a{*执行运算a*}
-                      lod l, a : load variable l,a{*层次差为l，相对地址为a,读取数据到栈顶*}
-                      sto l, a : store variable l,a{*层次差为l，相对地址为a,从栈顶存储数据*}
-                      cal l, a : call procedure a at level l{*调用过程，入口指令为a，层次为l*}
-                      int 0, a : increment t-register by a{*栈顶指针+a*}
-                      jmp 0, a : jump to a{*无条件跳转到a*}
-                      jpc 0, a : jump conditional to a{*有条件跳转到a*}
-                      red l, a : read variable l,a{*读取数据存储到a*}
-                      wrt 0, 0 : write stack-top{*输出栈顶*}
-                  }
-
-var   ch : char;      { last character read }{*最后读取的字符*}
-      sym: symbol;    { last symbol read }{*最后读到的类型*}
-      id : alfa;      { last identifier read }{*最后读到的标识符*}
-      num: integer;   { last number read }{*最后读到的数字*}
-      cc : integer;   { character count }{*行指针*}
-      ll : integer;   { line length }{*行长度*}
-      kk,err: integer;{*err统计出错个数*}
-      cx : integer;   { code allocation index }{*代码分配指针*}
-      line: array[1..81] of char;{*缓存一行代码*}
-      a : alfa;{*存储类型*}
-      code : array[0..cxmax] of instruction;{*200条指令*}
-      word : array[1..norw] of alfa;{*存储的13个保留字*}
-      wsym : array[1..norw] of symbol;{*存储的13个类型*}
-      ssym : array[char] of symbol;{*符号对应的额类型*}
-      mnemonic : array[fct] of
-                   packed array[1..5] of char;{*助记符*}
-      declbegsys, statbegsys, facbegsys : symset;
-      {*分别是 声明开始，表达式开始，项开始 *}
-      table : array[0..txmax] of {*定义符号表*}
-                record
-                  name : alfa;
-                  case kind: objecttyp of
-                    constant : (val:integer );
-                    variable,prosedure: (level,adr: integer )
-                end;
-      fin : text;     { source program file }
-      sfile: string;  { source program file name }
-
-procedure error( n : integer );  
-  begin
-    writeln( '****', ' ':cc-1, '^', n:2 );
-    err := err+1
-  end; { error }
-
-procedure getsym;  
-var i,j,k : integer;
-procedure getch;
-    begin
-      if cc = ll  { get character to end of line }
-      then begin { read next line }
-             if eof(fin)
-             then begin
-                   writeln('program incomplete');
-                   close(fin);
-                   exit;
-                  end;
-             ll := 0;
-             cc := 0;
-             write(cx:4,' ');  { print code address }
-             while not eoln(fin) do
-               begin
-                 ll := ll+1;
-                 read(fin,ch);
-                 write(ch);
-                 line[ll] := ch
-               end;
-             writeln;
-             readln(fin);
-             ll := ll+1;
-             line[ll] := ' ' { process end-line }
-           end;
-      cc := cc+1;
-      ch := line[cc]
-    end; { getch }
-  begin { procedure getsym;   }
-    while ch = ' ' do
-      getch;
-    if ch in ['a'..'z']
-    then begin  { identifier of reserved word }
-           k := 0;
-           repeat
-             if k < al
-             then begin
-                   k := k+1;
-                   a[k] := ch
-                 end;
-             getch
-           until not( ch in ['a'..'z','0'..'9']);
-           if k >= kk        { kk : last identifier length }
-           then kk := k
-           else repeat
-                  a[kk] := ' ';
-                  kk := kk-1
-               until kk = k;
-           id := a;
-           i := 1;
-           j := norw;   { binary search reserved word table }
-           repeat
-             k := (i+j) div 2;
-             if id <= word[k]
-             then j := k-1;
-             if id >= word[k]
-             then i := k+1
-           until i > j;
-           if i-1 > j
-           then sym := wsym[k]
-           else sym := ident
-         end
-    else if ch in ['0'..'9']
-         then begin  { number }
-                k := 0;
-                num := 0;
-                sym := number;
-                repeat
-                  num := 10*num+(ord(ch)-ord('0'));
-                  k := k+1;
-                  getch
-                until not( ch in ['0'..'9']);
-                if k > nmax
-                then error(30)
-              end
-         else if ch = ':'
-              then begin
-                    getch;
-                    if ch = '='
-                    then begin
-                          sym := becomes;
-                          getch
-                        end
-                    else sym := nul 
-                   end
-              else if ch = '<'
-                   then begin
-                          getch;
-                          if ch = '='
-                          then begin
-                                 sym := leq;
-                                 getch
-                               end
-                          else if ch = '>'
-                               then begin
-                                     sym := neq;
-                                     getch
-                                   end
-                          else sym := lss
-                        end
-                   else if ch = '>'
-                        then begin
-                               getch;
-                               if ch = '='
-                               then begin
-                                      sym := geq;
-                                      getch
-                                    end
-                               else sym := gtr
-                             end
-                        else begin
-                               sym := ssym[ch];
-                               getch
-                             end
-  end; { getsym }
-
-procedure gen( x: fct; y,z : integer ); 
-  begin
-    if cx > cxmax
-    then begin
-           writeln('program too long');
-           close(fin);
-           exit
-         end;
-    with code[cx] do
-      begin
-        f := x;
-        l := y;
-        a := z
-      end;
-    cx := cx+1
-  end; { gen }
-
-procedure test( s1,s2 :symset; n: integer ); 
-  begin
-    if not ( sym in s1 )
-    then begin
-           error(n);
-           s1 := s1+s2;
-           while not( sym in s1) do
-             getsym
-           end
-  end; { test }
-
-procedure block( lev,tx : integer; fsys : symset ); 
-  var  dx : integer;  { data allocation index }
-       tx0: integer;  { initial table index }
-       cx0: integer;  { initial code index }
-
-  procedure enter( k : objecttyp ); 
-    begin  { enter object into table }
-      tx := tx+1;
-      with table[tx] do
-        begin
-          name := id;
-          kind := k;
-          case k of
-            constant : begin
-                      if num > amax
-                      then begin
-                            error(30);
-                            num := 0
-                           end;
-                      val := num
-                    end;
-            variable : begin
-                      level := lev;
-                      adr := dx;
-                      dx := dx+1
-                    end;
-            prosedure: level := lev;
-          end
-        end
-    end; { enter }
-
-function position ( id : alfa ): integer; 
-  var i : integer;
-  begin
-    table[0].name := id;
-    i := tx;
-    while table[i].name <> id do
-       i := i-1;
-    position := i
-  end;  { position }
-
-procedure constdeclaration; 
-    begin
-      if sym = ident
-      then begin
-             getsym;
-             if sym in [eql,becomes]
-             then begin
-                    if sym = becomes
-                    then error(1);
-                    getsym;  
-                    if sym = number
-                    then begin
-                           enter(constant);
-                           getsym
-                         end
-                    else error(2)
-                  end
-             else error(3)
-           end
-      else error(4)
-    end; { constdeclaration }
-
-  procedure vardeclaration; 
-    begin
-      if sym = ident
-      then begin
-             enter(variable);
-             getsym
-           end
-      else error(4)
-    end; { vardeclaration }
-
-  procedure listcode;  
-    var i : integer;
-    begin
-      for i := cx0 to cx-1 do
-        with code[i] do
-          writeln( i:4, mnemonic[f]:7,l:3, a:5)
-    end; { listcode }
-
-procedure statement( fsys : symset );
-var i,cx1,cx2: integer;
-procedure expression( fsys: symset); 
-      var addop : symbol;
-      procedure term( fsys : symset);  
-        var mulop: symbol ;
-        procedure factor( fsys : symset );
-          var i : integer;
-          begin
-            test( facbegsys, fsys, 24 );
-            while sym in facbegsys do
-              begin
-                if sym = ident
-                then begin
-                       i := position(id);
-                       if i= 0
-                       then error(11)
-                       else
-                         with table[i] do
-                           case kind of
-                             constant : gen(lit,0,val);
-variable : gen(lod,lev-level,adr);
-prosedure: error(21)
-                           end;
-                       getsym
-                     end
-                else if sym = number
-                     then begin
-                            if num > amax
-                            then begin
-                                   error(30);
-                                   num := 0
-                                 end;
-                            gen(lit,0,num);
-                            getsym
-                          end
-                     else if sym = lparen
-                          then begin
-                                 getsym;
-                                 expression([rparen]+fsys);
-                                 if sym = rparen
-                                 then getsym
-                                 else error(22)
-                               end;
-                test(fsys,[lparen],23)
-              end
-          end; { factor }
-        begin { procedure term( fsys : symset);   
-                var mulop: symbol ;    }
-          factor( fsys+[times,slash]);
-          while sym in [times,slash] do
-            begin
-              mulop := sym;
-              getsym;
-              factor( fsys+[times,slash] );
-              if mulop = times
-              then gen( opr,0,4 )
-              else gen( opr,0,5)
-            end
-        end; { term }
-      begin { procedure expression( fsys: symset);  
-              var addop : symbol; }
-        if sym in [plus, minus]
-        then begin
-               addop := sym;
-               getsym;
-               term( fsys+[plus,minus]);
-               if addop = minus
-               then gen(opr,0,1)
-             end
-        else term( fsys+[plus,minus]);
-        while sym in [plus,minus] do
-          begin
-            addop := sym;
-            getsym;
-            term( fsys+[plus,minus] );
-            if addop = plus
-            then gen( opr,0,2)
-            else gen( opr,0,3)
-          end
-      end; { expression }
-
-    procedure condition( fsys : symset ); 
-      var relop : symbol;
-      begin
-        if sym = oddsym
-        then begin
-               getsym;
-               expression(fsys);
-               gen(opr,0,6)
-             end
-        else begin
-             expression( [eql,neq,lss,gtr,leq,geq]+fsys);
-             if not( sym in [eql,neq,lss,leq,gtr,geq])
-               then error(20)
-               else begin
-                      relop := sym;
-                      getsym;
-                      expression(fsys);
-                      case relop of
-                        eql : gen(opr,0,8);
-                        neq : gen(opr,0,9);
-                        lss : gen(opr,0,10);
-                        geq : gen(opr,0,11);
-                        gtr : gen(opr,0,12);
-                        leq : gen(opr,0,13);
-                      end
-                    end
-             end
-      end; { condition }
-    begin { procedure statement( fsys : symset );  
-      var i,cx1,cx2: integer; }
-      if sym = ident
-      then begin
-             i := position(id);
-             if i= 0
-             then error(11)
-             else if table[i].kind <> variable
-                  then begin { giving value to non-variation }
-                         error(12);
-                         i := 0
-                       end;
-             getsym;
-             if sym = becomes
-             then getsym
-             else error(13);
-             expression(fsys);
-             if i <> 0
-             then
-               with table[i] do
-                  gen(sto,lev-level,adr)
-          end
-      else if sym = callsym
-      then begin
-             getsym;
-             if sym <> ident
-             then error(14)
-             else begin
-                    i := position(id);
-                    if i = 0
-                    then error(11)
-                    else
-                      with table[i] do
-                        if kind = prosedure
-                        then gen(cal,lev-level,adr)
-                        else error(15);
-                    getsym
-                  end
-           end
-      else if sym = ifsym
-           then begin
-                  getsym;
-                  condition([thensym,dosym]+fsys);
-                  if sym = thensym
-                  then getsym
-                  else error(16);
-                  cx1 := cx;
-                  gen(jpc,0,0);
-                  statement(fsys);
-                  code[cx1].a := cx
-                end
-           else if sym = beginsym
-                then begin
-                       getsym;
-                       statement([semicolon,endsym]+fsys);
-                       while sym in ([semicolon]+statbegsys) do
-                         begin
-                           if sym = semicolon
-                           then getsym
-                           else error(10);
-                           statement([semicolon,endsym]+fsys)
-                         end;
-                       if sym = endsym
-                       then getsym
-                       else error(17)
-                     end
-                else if sym = whilesym
-                     then begin
-                            cx1 := cx;
-                            getsym;
-                            condition([dosym]+fsys);
-                            cx2 := cx;
-                            gen(jpc,0,0);
-                            if sym = dosym
-                            then getsym
-                            else error(18);
-                            statement(fsys);
-                            gen(jmp,0,cx1);
-                            code[cx2].a := cx
-                          end
-                     else if sym = readsym
-                          then begin
-                                 getsym;
-                                 if sym = lparen
-                                 then
-                                   repeat
-                                     getsym;
-                                     if sym = ident
-                                     then begin
-                                            i := position(id);
-                                            if i = 0
-                                            then error(11)
-                                            else if table[i].kind <> variable
-                                                 then begin
-                                                        error(12);
-                                                        i := 0
-                                                      end
-                                                 else with table[i] do
-                                                       gen(red,lev-level,adr)
-                                         end
-                                     else error(4);
-                                     getsym;
-                                   until sym <> comma
-                                 else error(40);
-                                 if sym <> rparen
-                                 then error(22);
-                                 getsym
-                               end
-                          else if sym = writesym
-                               then begin
-                                      getsym;
-                                      if sym = lparen
-                                      then begin
-                                             repeat
-                                               getsym;
-                                               expression([rparen,comma]+fsys);
-                                               gen(wrt,0,0);
-                                             until sym <> comma;
-                                             if sym <> rparen
-                                             then error(22);
-                                             getsym
-                                           end
-                                      else error(40)
-                                    end;
-      test(fsys,[],19)
-    end; { statement }
-  begin  {   procedure block( lev,tx : integer; fsys : symset );   
-    var  dx : integer;  /* data allocation index */
-    tx0: integer;  /*initial table index */
-    cx0: integer;  /* initial code index */              }
-    dx := 3;
-    tx0 := tx;
-    table[tx].adr := cx;
-    gen(jmp,0,0); { jump from declaration part to statement part }
-    if lev > levmax
-    then error(32);
-
-    repeat
-      if sym = constsym
-      then begin
-             getsym;
-             repeat
-               constdeclaration;
-               while sym = comma do
-                 begin
-                   getsym;
-                   constdeclaration
-                 end;
-               if sym = semicolon
-               then getsym
-               else error(5)
-             until sym <> ident
-           end;
-      if sym = varsym
-      then begin
-             getsym;
-             repeat
-               vardeclaration;
-               while sym = comma do
-                 begin
-                   getsym;
-                   vardeclaration
-                 end;
-               if sym = semicolon
-               then getsym
-               else error(5)
-             until sym <> ident;
-           end;
-      while sym = procsym do
-        begin
-          getsym;
-          if sym = ident
-          then begin
-                 enter(prosedure);
-                 getsym
-               end
-          else error(4);
-          if sym = semicolon
-          then getsym
-          else error(5);
-          block(lev+1,tx,[semicolon]+fsys);
-          if sym = semicolon
-          then begin
-                 getsym;
-                 test( statbegsys+[ident,procsym],fsys,6)
-               end
-          else error(5)
-        end;
-      test( statbegsys+[ident],declbegsys,7)
-    until not ( sym in declbegsys );
-    code[table[tx0].adr].a := cx;  { back enter statement code's start adr. }
-    with table[tx0] do
-      begin
-        adr := cx; { code's start address }
-      end;
-    cx0 := cx;
-    gen(int,0,dx); { topstack point to operation area }
-    statement( [semicolon,endsym]+fsys);
-    gen(opr,0,0); { return }
-    test( fsys, [],8 );
-    listcode;
-  end { block };
-
-procedure interpret;  
-  const stacksize = 500;
-  var p,b,t: integer; { program-,base-,topstack-register }
-     i : instruction;{ instruction register }
-     s : array[1..stacksize] of integer; { data store }
-  function base( l : integer ): integer;
-    var b1 : integer;
-    begin { find base l levels down }
-      b1 := b;
-      while l > 0 do
-        begin
-          b1 := s[b1];
-          l := l-1
-        end;
-      base := b1
-    end; { base }
-  begin  
-    writeln( 'START PL/0' );
-    t := 0;
-    b := 1;
-    p := 0;
-    s[1] := 0;
-    s[2] := 0;
-    s[3] := 0;
-    repeat
-      i := code[p];
-      p := p+1;
-      with i do
-        case f of
-          lit : begin
-                  t := t+1;
-                  s[t]:= a;
-              end;
-          opr : case a of { operator }
-                  0 : begin { return }
-                        t := b-1;
-                        p := s[t+3];
-                        b := s[t+2];
-                     end;
-                  1 : s[t] := -s[t];
-                  2 : begin
-                        t := t-1;
-                        s[t] := s[t]+s[t+1]
-                     end;
-                  3 : begin
-                        t := t-1;
-                        s[t] := s[t]-s[t+1]
-                     end;
-                  4 : begin
-                        t := t-1;
-                        s[t] := s[t]*s[t+1]
-                     end;
-                  5 : begin
-                        t := t-1;
-                        s[t] := s[t]div s[t+1]
-                     end;
-                  6 : s[t] := ord(odd(s[t]));
-                  8 : begin
-                        t := t-1;
-                        s[t] := ord(s[t]=s[t+1])
-                    end;
-                  9 : begin
-                        t := t-1;
-                        s[t] := ord(s[t]<>s[t+1])
-                     end;
-                  10: begin
-                        t := t-1;
-                        s[t] := ord(s[t]< s[t+1])
-                     end;
-                  11: begin
-                        t := t-1;
-                        s[t] := ord(s[t] >= s[t+1])
-                     end;
-                  12: begin
-                        t := t-1;
-                        s[t] := ord(s[t] > s[t+1])
-                     end;
-                  13: begin
-                        t := t-1;
-                        s[t] := ord(s[t] <= s[t+1])
-                     end;
-                end;
-          lod : begin
-                  t := t+1;
-                  s[t] := s[base(l)+a]
-              end;
-          sto : begin
-                  s[base(l)+a] := s[t];  { writeln(s[t]); }
-                  t := t-1
-              end;
-          cal : begin  { generate new block mark }
-                  s[t+1] := base(l);
-                  s[t+2] := b;
-                  s[t+3] := p;
-                  b := t+1;
-                  p := a;
-              end;
-          int : t := t+a;
-          jmp : p := a;
-          jpc : begin
-                  if s[t] = 0
-                  then p := a;
-                  t := t-1;
-              end;
-          red : begin
-                  writeln('??:');
-                  readln(s[base(l)+a]); 
-              end;
-          wrt : begin
-                  writeln(s[t]);
-                  t := t+1
-              end
-        end { with,case }
-    until p = 0;
-    writeln('END PL/0');
-  end; { interpret }
-
-begin { main }
-  writeln('please input source program file name : ');
-  readln(sfile);
-  assign(fin,sfile);
-  reset(fin);
-  for ch := 'A' to ';' do
-    ssym[ch] := nul;
-  word[1] := 'begin        '; word[2] := 'call         ';
-  word[3] := 'const        '; word[4] := 'do           ';
-  word[5] := 'end          '; word[6] := 'if           ';
-  word[7] := 'odd          '; word[8] := 'procedure    ';
-  word[9] := 'read         '; word[10]:= 'then         ';
-  word[11]:= 'var          '; word[12]:= 'while        ';
-  word[13]:= 'write        ';
-
-  wsym[1] := beginsym;      wsym[2] := callsym;
-  wsym[3] := constsym;      wsym[4] := dosym;
-  wsym[5] := endsym;        wsym[6] := ifsym;
-  wsym[7] := oddsym;        wsym[8] := procsym;
-  wsym[9] := readsym;       wsym[10]:= thensym;
-  wsym[11]:= varsym;        wsym[12]:= whilesym;
-  wsym[13]:= writesym;
-
-  ssym['+'] := plus;        ssym['-'] := minus;
-  ssym['*'] := times;       ssym['/'] := slash;
-  ssym['('] := lparen;      ssym[')'] := rparen;
-  ssym['='] := eql;         ssym[','] := comma;
-  ssym['.'] := period;
-  ssym['<'] := lss;         ssym['>'] := gtr;
-  ssym[';'] := semicolon;
-
-  mnemonic[lit] := 'LIT  '; mnemonic[opr] := 'OPR  ';
-  mnemonic[lod] := 'LOD  '; mnemonic[sto] := 'STO  ';
-  mnemonic[cal] := 'CAL  '; mnemonic[int] := 'INT  ';
-  mnemonic[jmp] := 'JMP  '; mnemonic[jpc] := 'JPC  ';
-  mnemonic[red] := 'RED  '; mnemonic[wrt] := 'WRT  ';
-
-  declbegsys := [ constsym, varsym, procsym ];
-  statbegsys := [ beginsym, callsym, ifsym, whilesym];
-  facbegsys := [ ident, number, lparen ];
-  err := 0;
-  cc := 0;
-  cx := 0;
-  ll := 0;
-  ch := ' ';
-  kk := al;
-  getsym;
-  block( 0,0,[period]+declbegsys+statbegsys );
-  if sym <> period
-  then error(9);
-  if err = 0
-  then interpret
-  else write('ERRORS IN PL/0 PROGRAM');
-  writeln;
-  close(fin)
-end.                                                     
- 
-附录B Pascal-s编译系统源代码
 program PASCALS(INPUT,OUTPUT,PRD,PRR);
 {  author:N.Wirth, E.T.H. CH-8092 Zurich,1.3.76 }
 {  modified by R.E.Berry
     Department of computer studies
-    UniversitY of Lancaster
+    University of Lancaster
 
-    Variants ot this program are used on
+    Variants of this program are used on
     Data General Nova,Apple,and
     Western Digital Microengine machines. }
 {   further modified by M.Z.Jin
     Department of Computer Science&Engineering BUAA,0ct.1989
 }
-const nkw = 27;    { no. of key words }
-      alng = 10;   { no. of significant chars in identifiers }
-      llng = 121;  { input line length }
+const nkw = 27;    { no. of key words }{*保留字个数*}
+      alng = 10;   { no. of significant chars in identifiers }{*标识符长度，名字取前10个字符*}
+      llng = 121;  { input line length }{*输入行长度*}
       emax = 322;  { max exponent of real numbers }
       emin = -292; { min exponent }
       kmax = 15;   { max no. of significant digits }
-      tmax = 100;  { size of table }
-      bmax = 20;   { size of block-talbe }
+      tmax = 100;  { size of table }{*符号表的最大长度*}
+      bmax = 20;   { size of block-table }
       amax = 30;   { size of array-table }
       c2max = 20;  { size of real constant table }
       csmax = 30;  { max no. of cases }
       cmax = 800;  { size of code }
-      lmax = 7;    { maximum level }
+      lmax = 7;    { maximum level }{*嵌套层次最多7层，也是x域的边界*}
       smax = 600;  { size of string-table }
       ermax = 58;  { max error no. }
-      omax = 63;   { highest order code }
-      xmax = 32767;  { 2**15-1 }
-      nmax = 32767;  { 2**15-1 }
+      omax = 63;   { highest order code }{*Pcode中f字段总共有63个值*}
+      xmax = 32767;  { 2**15-1 }{*index上下界*}
+      nmax = 32767;  { 2**15-1 }{*Pcode的y域边界*}
       lineleng = 132; { output line length }
       linelimit = 200;
-      stacksize = 1450;
+      stacksize = 1450;{*数据栈大小*}
 type symbol = ( intcon, realcon, charcon, stringcon,
                 notsy, plus, minus, times, idiv, rdiv, imod, andsy, orsy,
                 eql, neq, gtr, geq, lss, leq,
@@ -828,9 +43,9 @@ type symbol = ( intcon, realcon, charcon, stringcon,
                 beginsy, ifsy, casesy, repeatsy, whilesy, forsy,
                 endsy, elsesy, untilsy, ofsy, dosy, tosy, downtosy, thensy);
      index = -xmax..+xmax;
-     alfa = packed array[1..alng]of char;
-     objecttyp = (konstant, vvariable, typel, prozedure, funktion );
-     types = (notyp, ints, reals, bools, chars, arrays, records );
+     alfa = packed array[1..alng]of char;{*packed是压缩的，方便查找*}
+     objecttyp = (konstant, vvariable, typel, prozedure, funktion );{*标识符的种类：常量，变量，类型，过程，函数*}
+     types = (notyp, ints, reals, bools, chars, arrays, records );{*标识符类型：notyp，整型，实型，布尔型，字符型，数组型，记录型*}
      symset = set of symbol;
      typset = set of types;
      item = record
@@ -839,66 +54,66 @@ type symbol = ( intcon, realcon, charcon, stringcon,
             end;
 
      order = packed record
-               f: -omax..+omax;
-               x: -lmax..+lmax;
-               y: -nmax..+nmax
-            end;
-var  ch:         char; { last character read from source program }
-     rnum:       real; { real number from insymbol }
-     inum:       integer;     { integer from insymbol }
-     sleng:      integer;     { string length }
-     cc:         integer;     { character counter }
-     lc:         integer;     { program location counter }
-     ll:         integer;     { length of current line }
-     errpos:     integer;
-     t,a,b,sx,c1,c2:integer;  { indices to tables }
-     iflag, oflag, skipflag, stackdump, prtables: boolean;
-     sy:         symbol;      { last symbol read by insymbol }
-     errs:       set of 0..ermax;
-     id:         alfa;        { identifier from insymbol }
-     progname:   alfa;
-     stantyps:   typset;
-     constbegsys, typebegsys, blockbegsys, facbegsys, statbegsys: symset;
-     line:       array[1..llng] of char;
-     key:        array[1..nkw] of alfa;
-     ksy:        array[1..nkw] of symbol;
-     sps:        array[char]of symbol;  { special symbols }
-     display:    array[0..lmax] of integer;
-     tab:        array[0..tmax] of      { indentifier lable }
+                f: -omax..+omax;
+x: -lmax..+lmax;
+                y: -nmax..+nmax
+end;{*生成Pcode用的数据结构。见书458页*}
+var   ch:         char; { last character read from source program }{*ch是从源程序中读到的最新的字符*}
+      rnum:       real; { real number from insymbol }{*词法分析器得到的实数*}
+inum:       integer;     { integer from insymbol }{*词法分析器得到的整数*}
+sleng:      integer;     { string length }{*字符串的长度*}
+      cc:         integer;     { character counter }{*行指针*}
+      lc:         integer;     { program location counter }{*Pcode代码指针*}
+      ll:         integer;     { length of current line }{*当前行长度*}
+      errpos:     integer;{*记录错误位置*}
+      t,a,b,sx,c1,c2:integer;  { indices to tables }{*表的索引：t符号表，a数组信息向量表，b分程序表，sx字符串常量表，c2实常量表，*}
+      iflag, oflag, skipflag, stackdump, prtables: boolean;
+      sy:         symbol;      { last symbol read by insymbol }{*词法分析器读到的最新的符号*}
+      errs:       set of 0..ermax;{*记录错误*}
+      id:         alfa;        { identifier from insymbol }{*符号表id*}
+      progname:   alfa;{*程序名*}
+      stantyps:   typset;{*标准类型*}
+      constbegsys, typebegsys, blockbegsys, facbegsys, statbegsys: symset;{*各种begin symbol*}
+      line:       array[1..llng] of char;{*读取一行代码*}
+      key:        array[1..nkw] of alfa;{*保留字集合*}
+      ksy:        array[1..nkw] of symbol;{*保留字对应的记忆符*}
+      sps:        array[char]of symbol;  { special symbols }{*特殊符号，+-*/这样的*}
+      display:    array[0..lmax] of integer;{*各层次分程序运行栈基地址索引表*}
+      tab:        array[0..tmax] of      { indentifier lable }{*符号表一项的结构*}
                  packed record
-                     name: alfa;
-                     link: index;
-                     obj:  objecttyp;
-                     typ:  types;
-                     ref:  index;
-                     normal: boolean;
-                     lev:  0..lmax;
-                     adr: integer
-                 end;
-     atab:       array[1..amax] of    { array-table }
+                     name: alfa;{*标识符名字，取10个字符*}
+                     link: index;{*同一分程序中，上一个标识符在符号表中的位置，每个分程序的第一个标识符link为0，记录变量当作分程序看*}
+                     obj:  objecttyp;{*标识符种类*}
+                     typ:  types;{*标识符类型*}
+                     ref:  index;{*数组类型或数组变量则指向数组信息向量表，记录类型记录变量则指向分程序表，过程名函数名指向分程序表，否则为0*}
+normal: boolean;{*变量形参时为0，值形参或其他变量为1*}
+                     lev:  0..lmax;{*所在分程序的层次，主程序为1*}
+                     adr: integer{*变量填入运行栈中分配存储空间的相对地址，记录域名填入相对记录变量起始地址的位移，过程名函数名填入目标代码入口地址，整数填入整数值，布尔值填入布尔值，字符常量名填入ASCII代码值，实常量填入实常量表的位置，类型填入所需存储单元的数目*}
+end;
+     atab:       array[1..amax] of    { array-table }{*数组信息向量表*}
                  packed record
-                     inxtyp,eltyp: types;
-                     elref,low,high,elsize,size: index
+                     inxtyp,eltyp: types;{*下标类型（整数、布尔、字符），数组元素类型*}
+                     elref{*数组填入登记项位置，记录填入等级位置，否则0*},low,high{*上下界*},elsize{*数组元素大小*},size{*数组大小*}: index
                  end;
-     btab:       array[1..bmax] of    { block-table }
+     btab:       array[1..bmax] of    { block-table }{*分程序表*}
                  packed record
-                     last, lastpar, psize, vsize: index
+                     last{*最后一个标识符在表中的位置*}, lastpar{*最后一个参数的位置*}, psize{*参数和运行栈内务信息区占的单元数*}, vsize{*局部变量、参数、内务信息区在运行栈中占的单元数*}: index
                  end;
-     stab:       packed array[0..smax] of char; { string table }
-     rconst:     array[1..c2max] of real;
-     code:       array[0..cmax] of order;
+     stab:       packed array[0..smax] of char; { string table }{*字符串变量表*}
+     rconst:     array[1..c2max] of real;{*实常量表*}
+     code:       array[0..cmax] of order;{*P代码表*}
      psin,psout,prr,prd:text;      { default in pascal p }
-     inf, outf, fprr: string;
+     inf, outf, fprr: string;{*代码输入，代码输出，结果输出的文件路径*}
 
-procedure errormsg;
+procedure errormsg;{*打印错误信息*}
   var k : integer;
-     msg: array[0..ermax] of alfa;
+     msg: array[0..ermax] of alfa;{*设置错误信息表，总共ermax种错误*}
   begin
     msg[0] := 'undef id  ';    msg[1] := 'multi def ';
     msg[2] := 'identifier';    msg[3] := 'program   ';
-    msg[4] := ')         ';    msg[5] := ':         ';
-    msg[6] := 'syntax    ';    msg[7] := 'ident,var ';
-    msg[8] := 'of        ';    msg[9] := '(         ';
+msg[4] := ')         ';    msg[5] := ':         ';
+    msg[6] := 'syntax    ';    msg[7] := 'ident,var '; 
+msg[8] := 'of        ';    msg[9] := '(         ';
     msg[10] := 'id,array  ';    msg[11] := '(         ';
     msg[12] := ']         ';    msg[13] := '..        ';
     msg[14] := ';         ';    msg[15] := 'func. type';
@@ -911,13 +126,13 @@ procedure errormsg;
     msg[28] := 'no array  ';    msg[29] := 'type id   ';
     msg[30] := 'undef type';    msg[31] := 'no record ';
     msg[32] := 'boole type';    msg[33] := 'arith type';
-    msg[34] := 'integer   ';    msg[35] := 'types     ';
+msg[34] := 'integer   ';    msg[35] := 'types     ';
     msg[36] := 'param type';    msg[37] := 'variab id ';
-    msg[38] := 'string    ';    msg[39] := 'no.of pars';
+msg[38] := 'string    ';    msg[39] := 'no.of pars';
     msg[40] := 'real numbr';    msg[41] := 'type      ';
-    msg[42] := 'real type ';    msg[43] := 'integer   ';
+msg[42] := 'real type ';    msg[43] := 'integer   ';
     msg[44] := 'var,const ';    msg[45] := 'var,proc  ';
-    msg[46] := 'types(:=) ';    msg[47] := 'typ(case) ';
+msg[46] := 'types(:=) ';    msg[47] := 'typ(case) ';
     msg[48] := 'type      ';    msg[49] := 'store ovfl';
     msg[50] := 'constant  ';    msg[51] := ':=        ';
     msg[52] := 'then      ';    msg[53] := 'until     ';
@@ -925,112 +140,112 @@ procedure errormsg;
     msg[56] := 'begin     ';    msg[57] := 'end       ';
     msg[58] := 'factor';
 
-    writeln(psout);
+    writeln(psout);{*向psout中输出一个空行*}
     writeln(psout,'key words');
     k := 0;
-    while errs <> [] do
+    while errs <> [] do{*如果errs还不为空*}
       begin
-        while not( k in errs )do k := k + 1;
-        writeln(psout, k, ' ', msg[k] );
-        errs := errs - [k]
-    end { while errs }
+        while not( k in errs )do k := k + 1;{*如果k错误不存在k++*}
+writeln(psout, k, ' ', msg[k] );
+        errs := errs - [k]{*如果存在k错误，向文件输出错误编号和具体信息，从errs中删去这个错误*}
+end { while errs }{*知道所有错误都被处理*}
   end { errormsg } ;
 
-procedure endskip;
+procedure endskip;{*在出错程序下画线*}
   begin                 { underline skipped part of input }
     while errpos < cc do
       begin
         write( psout, '-');
         errpos := errpos + 1
-      end;
+      end;{*只要错误位置在行指针之前就画线，错误位置指针后移*}
     skipflag := false
   end { endskip };
 
 
-procedure nextch;  { read next character; process line end }
+procedure nextch;  { read next character; process line end }{*读下一个字符*}
   begin
-    if cc = ll
+    if cc = ll{*行指针指向行末尾，说明一行读完了*}
     then begin
-           if eof( psin )
+           if eof( psin ){*如果输入文件结束了*}
            then begin
                   writeln( psout );
                   writeln( psout, 'program incomplete' );
-                  errormsg;
+                  errormsg;{*输出信息到输出文件，报错*}
                   exit;
                 end;
-           if errpos <> 0
+           if errpos <> 0{*如果位置不为0，则说明有错误*}
            then begin
-                  if skipflag then endskip;
+                  if skipflag then endskip;{*跳过错误代码*}
                   writeln( psout );
-                  errpos := 0
+                  errpos := 0{*错误位置置0*}
                 end;
-           write( psout, lc: 5, ' ');
+           write( psout, lc: 5, ' ');{*没有错误，则输出文件中按场宽为5的格式输出Pcode行数和一个空格，不换行*}
            ll := 0;
-           cc := 0;
-           while not eoln( psin ) do
+           cc := 0;{*行长度置0，行指针置0*}
+           while not eoln( psin ) do{*如果输入文件没有读完*}
              begin
                ll := ll + 1;
                read( psin, ch );
                write( psout, ch );
-               line[ll] := ch
+               line[ll] := ch{*行长度++，读一个字符，输出到输出文件中，并将这个字符赋值到对应位置，这样循环读完一行*}
              end;
-           ll := ll + 1;
+           ll := ll + 1;{*最后的行长度，留了一个位置*}
            readln( psin );
-           line[ll] := ' ';
+           line[ll] := ' ';{*留的位置赋一个空格*}
            writeln( psout );
          end;
          cc := cc + 1;
-         ch := line[cc];
+         ch := line[cc];{*行指针前移，取了一个字符，相当于预读了一个字符*}
   end { nextch };
 
-procedure error( n: integer );
+procedure error( n: integer );{*打印出错位置*}
 begin
   if errpos = 0
   then write ( psout, '****' );
   if cc > errpos
   then begin
-         write( psout, ' ': cc-errpos, '^', n:2);
-         errpos := cc + 3;
-         errs := errs +[n]
-      end
+         write( psout, ' ': cc-errpos, '^', n:2);{*在出错位置的下方输出一个尖*}
+errpos := cc + 3;
+         errs := errs +[n]{*错误集合中加入这个错误*}
+end
 end { error };
 
-procedure fatal( n: integer );
+procedure fatal( n: integer );{*表溢出时终止程序*}
   var msg : array[1..7] of alfa;
   begin
     writeln( psout );
     errormsg;
     msg[1] := 'identifier';   msg[2] := 'procedures';
     msg[3] := 'reals     ';   msg[4] := 'arrays    ';
-    msg[5] := 'levels    ';   msg[6] := 'code      ';
+msg[5] := 'levels    ';   msg[6] := 'code      ';
     msg[7] := 'strings   ';
-    writeln( psout, 'compiler table for ', msg[n], ' is too small');
-    exit; {terminate compilation }
+writeln( psout, 'compiler table for ', msg[n], ' is too small');
+    exit; {terminate compilation }{*输出哪个表溢出*}
   end { fatal };
 
-procedure insymbol;  {reads next symbol}
-label 1,2,3;
+procedure insymbol;  {reads next symbol}{*词法分析*}
+label 1,2,3;{*定义了三个标签*}
   var  i,j,k,e: integer;
 procedure readscale;
     var s,sign: integer;
     begin
-      nextch;
-      sign := 1;
-      s := 0;
-      if ch = '+'
+      nextch;{*读取下一个字符*}
+      sign := 1;{*读到的数的正负*}
+      s := 0;{*计算读到的数字*}
+      if ch = '+'{*读到正好不处理，说明是简单表达式，继续读*}
       then nextch
       else if ch = '-'
            then begin
                   nextch;
-                  sign := -1
+                  sign := -1{*是个负数*}
                 end;
       if not(( ch >= '0' )and (ch <= '9' ))
-      then error( 40 )
+      then error( 40 ){*如果接着的不是数字就报错*}
       else repeat
            s := 10*s + ord( ord(ch)-ord('0'));
            nextch;
-          until not(( ch >= '0' ) and ( ch <= '9' ));
-      e := s*sign + e
+           until not(( ch >= '0' ) and ( ch <= '9' ));{*计算读到的数的值，知道读到一个不是0到9的字符*}
+      e := s*sign + e{*带上符号*}
     end { readscale };
 
   procedure adjustscale;
@@ -1038,9 +253,9 @@ procedure readscale;
         d, t : real;
     begin
       if k + e > emax
-      then error(21)
+      then error(21){*too big错误*}
       else if k + e < emin
-           then rnum := 0
+           then rnum := 0{*精度不够，直接置0*}
            else begin
                   s := abs(e);
                   t := 1.0;
@@ -1054,21 +269,21 @@ procedure readscale;
                     s := s - 1;
                     t := d * t
                   until s = 0;
-                  if e >= 0
+if e >= 0
                   then rnum := rnum * t
                   else rnum := rnum / t
-               end
-     end { adjustscale };
+end
+    end { adjustscale };
 
-  procedure options;
-    procedure switch( var b: boolean );
+  procedure options;{*处理编译选项*}
+    procedure switch( var b: boolean );{*处理+-号*}
       begin
-        b := ch = '+';
+        b := ch = '+';{*判断ch是否是+号，存入b*}
         if not b
-        then if not( ch = '-' )
+        then if not( ch = '-' ){*如果不是+号，而且也不是-号*}
              then begin { print error message }
                     while( ch <> '*' ) and ( ch <> ',' ) do
-                      nextch;
+                      nextch;{*一直读到*号或者，号*}
                   end
              else nextch
         else nextch
@@ -1081,12 +296,12 @@ procedure readscale;
                if ch = 't'
                then begin
                       nextch;
-                      switch( prtables )
+                      switch( prtables ){*编译选项t*}
                     end
                else if ch = 's'
                   then begin
                           nextch;
-                          switch( stackdump )
+                          switch( stackdump ){*编译选项s*}
                        end;
 
              end
@@ -1094,12 +309,12 @@ procedure readscale;
     end { options };
   begin { insymbol  }
   1: while( ch = ' ' ) or ( ch = chr(9) ) do
-       nextch;    { space & htab }
+       nextch;    { space & htab }{*跳过所有的空格和制表符*}
     case ch of
       'a','b','c','d','e','f','g','h','i',
       'j','k','l','m','n','o','p','q','r',
       's','t','u','v','w','x','y','z':
-        begin { identifier of wordsymbol }
+        begin { identifier of wordsymbol }{*如果是字母，开始识别标识符*}
           k := 0;
           id := '          ';
           repeat
@@ -1109,9 +324,9 @@ procedure readscale;
                    id[k] := ch
                  end;
             nextch
-          until not((( ch >= 'a' ) and ( ch <= 'z' )) or (( ch >= '0') and (ch <= '9' )));
+          until not((( ch >= 'a' ) and ( ch <= 'z' )) or (( ch >= '0') and (ch <= '9' )));{*一直读取字符，在10个字符的限制内，存入id中，直到遇到不是字母的字符*}
           i := 1;
-          j := nkw; { binary search }
+          j := nkw; { binary search }{*二分查找当前id在表的位置，字典序*}
           repeat
             k := ( i + j ) div 2;
             if id <= key[k]
@@ -1120,17 +335,18 @@ procedure readscale;
             then i := k + 1;
           until i > j;
           if i - 1 > j
-          then sy := ksy[k]
-          else sy := ident
+          then sy := ksy[k]{*得到这个id对应的保留字的记忆符*}
+          else sy := ident{*不是保留字，就是一个标识符*}
         end;
-      '0','1','2','3','4','5','6','7','8','9':
+      '0','1','2','3','4','5','6','7','8','9':{*开始识别无符号数*}
         begin { number }
+========================================================================
           k := 0;
           inum := 0;
           sy := intcon;
-          repeat
+repeat
             inum := inum * 10 + ord(ch) - ord('0');
-            k := k + 1;
+k := k + 1;
             nextch
           until not (( ch >= '0' ) and ( ch <= '9' ));
           if( k > kmax ) or ( inum > nmax )
@@ -1149,10 +365,10 @@ procedure readscale;
                         rnum := inum;
                         e := 0;
                         while ( ch >= '0' ) and ( ch <= '9' ) do
-                          begin
+begin
                             e := e - 1;
                             rnum := 10.0 * rnum + (ord(ch) - ord('0'));
-                            nextch
+nextch
                           end;
                         if e = 0
                         then error(40);
@@ -1163,10 +379,10 @@ procedure readscale;
                 end
           else if ch = 'e'
                then begin
-                      sy := realcon;
+sy := realcon;
                       rnum := inum;
                       e := 0;
-                      readscale;
+readscale;
                       if e <> 0
                       then adjustscale
                     end;
@@ -1252,7 +468,7 @@ procedure readscale;
                       inum := sx;
                       sleng := k;
                       sx := sx + k
-                   end
+                    end
         end;
       '(':
         begin
@@ -1393,33 +609,33 @@ procedure emit2( fct, a, b: integer );
 end { emit2 };
 
 procedure printtables;
-  var i: integer;
-  o: order;
+  var  i: integer;
+o: order;
       mne: array[0..omax] of
            packed array[1..5] of char;
   begin
     mne[0] := 'LDA  ';   mne[1] := 'LOD  ';  mne[2] := 'LDI  ';
-    mne[3] := 'DIS  ';   mne[8] := 'FCT  ';  mne[9] := 'INT  ';
+mne[3] := 'DIS  ';   mne[8] := 'FCT  ';  mne[9] := 'INT  ';
     mne[10] := 'JMP  ';   mne[11] := 'JPC  ';  mne[12] := 'SWT  ';
     mne[13] := 'CAS  ';   mne[14] := 'F1U  ';  mne[15] := 'F2U  ';
     mne[16] := 'F1D  ';   mne[17] := 'F2D  ';  mne[18] := 'MKS  ';
     mne[19] := 'CAL  ';   mne[20] := 'IDX  ';  mne[21] := 'IXX  ';
     mne[22] := 'LDB  ';   mne[23] := 'CPB  ';  mne[24] := 'LDC  ';
-    mne[25] := 'LDR  ';   mne[26] := 'FLT  ';  mne[27] := 'RED  ';
-    mne[28] := 'WRS  ';   mne[29] := 'WRW  ';  mne[30] := 'WRU  ';
+mne[25] := 'LDR  ';   mne[26] := 'FLT  ';  mne[27] := 'RED  ';
+mne[28] := 'WRS  ';   mne[29] := 'WRW  ';  mne[30] := 'WRU  ';
     mne[31] := 'HLT  ';   mne[32] := 'EXP  ';  mne[33] := 'EXF  ';
     mne[34] := 'LDT  ';   mne[35] := 'NOT  ';  mne[36] := 'MUS  ';
-    mne[37] := 'WRR  ';   mne[38] := 'STO  ';  mne[39] := 'EQR  ';
-    mne[40] := 'NER  ';   mne[41] := 'LSR  ';  mne[42] := 'LER  ';
+mne[37] := 'WRR  ';   mne[38] := 'STO  ';  mne[39] := 'EQR  ';
+mne[40] := 'NER  ';   mne[41] := 'LSR  ';  mne[42] := 'LER  ';
     mne[43] := 'GTR  ';   mne[44] := 'GER  ';  mne[45] := 'EQL  ';
-    mne[46] := 'NEQ  ';   mne[47] := 'LSS  ';  mne[48] := 'LEQ  ';
+mne[46] := 'NEQ  ';   mne[47] := 'LSS  ';  mne[48] := 'LEQ  ';
     mne[49] := 'GRT  ';   mne[50] := 'GEQ  ';  mne[51] := 'ORR  ';
     mne[52] := 'ADD  ';   mne[53] := 'SUB  ';  mne[54] := 'ADR  ';
     mne[55] := 'SUR  ';   mne[56] := 'AND  ';  mne[57] := 'MUL  ';
     mne[58] := 'DIV  ';   mne[59] := 'MOD  ';  mne[60] := 'MUR  ';
     mne[61] := 'DIR  ';   mne[62] := 'RDL  ';  mne[63] := 'WRL  ';
 
-    writeln(psout);
+writeln(psout);
     writeln(psout);
     writeln(psout);
     writeln(psout,'   identifiers  link  obj  typ  ref  nrm  lev  adr');
@@ -1450,9 +666,9 @@ procedure printtables;
     writeln( psout );
     for i := 0 to lc-1 do
       begin
-        write( psout, i:5 );
+write( psout, i:5 );
         o := code[i];
-        write( psout, mne[o.f]:8, o.f:5 );
+write( psout, mne[o.f]:8, o.f:5 );
         if o.f < 31
         then if o.f < 4
              then write( psout, o.x:5, o.y:5 )
@@ -1470,15 +686,14 @@ procedure block( fsys: symset; isfun: boolean; level: integer );
                   case tp: types of
                     ints, chars, bools : ( i:integer );
                     reals :( r:real )
-              end;
+                end;
   var dx : integer ;  { data allocation index }
       prt: integer ;  { t-index of this procedure }
       prb: integer ;  { b-index of this procedure }
-      x  : integer ;
-
+x  : integer ;
 
   procedure skip( fsys:symset; n:integer);
-    begin
+begin
       error(n);
       skipflag := true;
       while not ( sy in fsys ) do
@@ -1544,9 +759,9 @@ procedure block( fsys: symset; isfun: boolean; level: integer );
       repeat
         j := btab[display[i]].last;
         while tab[j].name <> id do
-        j := tab[j].link;
-       i := i - 1;
-      until ( i < 0 ) or ( j <> 0 );
+j := tab[j].link;
+        i := i - 1;
+until ( i < 0 ) or ( j <> 0 );
       if j = 0
       then error(0);
       loc := j
@@ -1563,10 +778,10 @@ procedure block( fsys: symset; isfun: boolean; level: integer );
     end { entervariable };
 
   procedure constant( fsys: symset; var c: conrec );
-    var x, sign : integer;
+var x, sign : integer;
     begin
       c.tp := notyp;
-      c.i := 0;
+c.i := 0;
       test( constbegsys, fsys, 50 );
       if sy in constbegsys
       then begin
@@ -1611,7 +826,7 @@ procedure block( fsys: symset; isfun: boolean; level: integer );
                                    c.r := sign*rnum;
                                    insymbol
                                  end
-                       else skip(fsys,50)
+                            else skip(fsys,50)
                 end;
                 test(fsys,[],6)
            end
@@ -1620,12 +835,12 @@ procedure block( fsys: symset; isfun: boolean; level: integer );
 procedure typ( fsys: symset; var tp: types; var rf,sz:integer );
     var eltp : types;
         elrf, x : integer;
-        elsz, offset, t0, t1 : integer;
+elsz, offset, t0, t1 : integer;
 
-    procedure arraytyp( var aref, arsz: integer );
-      var eltp : types;
-         low, high : conrec;
-         elrf, elsz: integer;
+procedure arraytyp( var aref, arsz: integer );
+var eltp : types;
+      low, high : conrec;
+      elrf, elsz: integer;
       begin
         constant( [colon, rbrack, rparent, ofsy] + fsys, low );
         if low.tp = reals
@@ -1734,7 +949,7 @@ procedure typ( fsys: symset; var tp: types; var rf,sz:integer );
                                then insymbol
                                else error(5);
                                t1 := t;
-                               typ( fsys + [semicolon, endsy, comma,ident], eltp, elrf,                                  elsz );
+                               typ( fsys + [semicolon, endsy, comma,ident], eltp, elrf, elsz );
                                while t0 < t1 do
                                begin
                                  t0 := t0 + 1;
@@ -1825,10 +1040,10 @@ procedure typ( fsys: symset; var tp: types; var rf,sz:integer );
                 begin
                   typ := tp;
                   ref := rf;
-                  adr := dx;
+adr := dx;
                   lev := level;
                   normal := valpar;
-                  dx := dx + sz
+dx := dx + sz
                 end
             end;
             if sy <> rparent
@@ -1853,8 +1068,8 @@ procedure typ( fsys: symset; var tp: types; var rf,sz:integer );
 
 
 procedure constdec;
-   var c : conrec;
-   begin
+    var c : conrec;
+begin
       insymbol;
       test([ident], blockbegsys, 2 );
       while sy = ident do
@@ -1873,18 +1088,18 @@ procedure constdec;
           tab[t].ref := 0;
           if c.tp = reals
           then begin
-                 enterreal(c.r);
-                 tab[t].adr := c1;
-              end
+enterreal(c.r);
+                tab[t].adr := c1;
+end
           else tab[t].adr := c.i;
           testsemicolon
         end
     end { constdec };
 
   procedure typedeclaration;
-    var tp: types;
+var tp: types;
         rf, sz, t1 : integer;
-    begin
+begin
       insymbol;
       test([ident], blockbegsys,2 );
       while sy = ident do
@@ -1911,11 +1126,11 @@ procedure constdec;
     end { typedeclaration };
 
   procedure variabledeclaration;
-    var tp : types;
+var tp : types;
         t0, t1, rf, sz : integer;
     begin
       insymbol;
-      while sy = ident do
+while sy = ident do
         begin
           t0 := t;
           entervariable;
@@ -2027,16 +1242,16 @@ procedure expression(fsys:symset; var x:item); forward;
                       error(12);
                       if sy = rparent
                       then insymbol
-                   end
+                    end
              end
       until not( sy in[lbrack, lparent, period]);
       test( fsys,[],6)
     end { selector };
 
     procedure call( fsys: symset; i:integer );
-       var x : item;
+var x : item;
           lastp,cp,k : integer;
-       begin
+begin
         emit1(18,i); { mark stack }
         lastp := btab[tab[i].ref].lastpar;
         cp := i;
@@ -2079,15 +1294,14 @@ procedure expression(fsys:symset; var x:item); forward;
                                              x.ref := tab[k].ref;
                                              if tab[k].normal
                                              then emit2(0,tab[k].lev,tab[k].adr)
-                                             else emit2(1,tab[k].lev,tab[k].adr);
-                                             if sy in [lbrack, lparent, period]
-                                             then 
-                                              selector(fsys+[comma,colon,rparent],x);
+else emit2(1,tab[k].lev,tab[k].adr);
+if sy in [lbrack, lparent, period]
+                                             then selector(fsys+[comma,colon,rparent],x);
                                              if ( x.typ <> tab[cp].typ ) or ( x.ref <> tab[cp].ref )
                                              then error(36)
-                                          end
-                                   end
-                            end {variable parameter }
+                                           end
+                                    end
+                             end {variable parameter }
                       end;
                  test( [comma, rparent],fsys,6)
                until sy <> comma;
@@ -2117,17 +1331,17 @@ procedure expression(fsys:symset; var x:item); forward;
                        else begin
                               resulttype := reals;
                               emit1(26,1)
-                           end
+                            end
                   else begin
                          resulttype := reals;
                          if b = ints
                          then emit1(26,0)
-                      end
+                       end
       end { resulttype } ;
 
     procedure expression( fsys: symset; var x: item );
-      var y : item;
-         op : symbol;
+var y : item;
+          op : symbol;
 
       procedure simpleexpression( fsys: symset; var x: item );
         var y : item;
@@ -2142,7 +1356,7 @@ procedure expression(fsys:symset; var x:item); forward;
 
             procedure standfct( n: integer );
               var ts : typset;
-              begin  { standard function no. n }
+begin  { standard function no. n }
                 if sy = lparent
                 then insymbol
                 else error(9);
@@ -2155,19 +1369,19 @@ procedure expression(fsys:symset; var x:item); forward;
                                            tab[i].typ := x.typ;
                                            if x.typ = reals
                                            then n := n + 1
-                                     end;
+                                         end;
                        { odd, chr } 4,5: ts := [ints];
                        { odr }        6: ts := [ints,bools,chars];
                        { succ,pred } 7,8 : begin
                                              ts := [ints, bools,chars];
                                              tab[i].typ := x.typ
-                                       end;
+                                           end;
                        { round,trunc } 9,10,11,12,13,14,15,16:
                        { sin,cos,... }     begin
                                              ts := [ints,reals];
                                              if x.typ = ints
                                              then emit1(26,0)
-                                       end;
+                                           end;
                      end; { case }
                      if x.typ in ts
                      then emit1(8,n)
@@ -2182,8 +1396,8 @@ procedure expression(fsys:symset; var x:item); forward;
                             else insymbol;
                        emit1(8,n);
                      end;
-                x.typ := tab[i].typ;
-                if sy = rparent
+x.typ := tab[i].typ;
+if sy = rparent
                 then insymbol
                 else error(4)
               end { standfct } ;
@@ -2203,9 +1417,9 @@ procedure expression(fsys:symset; var x:item); forward;
                                          x.typ := typ;
                                          x.ref := 0;
                                          if x.typ = reals
-                                         then emit1(25,adr)
+then emit1(25,adr)
                                          else emit1(24,adr)
-                                     end;
+end;
                              vvariable:begin
                                          x.typ := typ;
                                          x.ref := ref;
@@ -2213,9 +1427,9 @@ procedure expression(fsys:symset; var x:item); forward;
                                          then begin
                                                 if normal
                                                 then f := 0
-                                                else f := 1;
+else f := 1;
                                                 emit2(f,lev,adr);
-                                                selector(fsys,x);
+selector(fsys,x);
                                                 if x.typ in stantyps
                                                 then emit(34)
                                               end
@@ -2226,9 +1440,9 @@ procedure expression(fsys:symset; var x:item); forward;
                                                      else f := 2
                                                 else if normal
                                                      then f := 0
-                                                else f := 1;
+else f := 1;
                                                 emit2(f,lev,adr)
-                                             end
+end
                                        end;
                              typel,prozedure: error(44);
                              funktion: begin
@@ -2243,9 +1457,9 @@ procedure expression(fsys:symset; var x:item); forward;
                        then begin
                               if sy = realcon
                               then begin
-                                     x.typ := reals;
+x.typ := reals;
                                      enterreal(rnum);
-                                     emit1(25,c1)
+emit1(25,c1)
                                    end
                               else begin
                                      if sy = charcon
@@ -2422,8 +1636,8 @@ procedure expression(fsys:symset; var x:item); forward;
       var x,y: item;
           f  : integer;
       begin   { tab[i].obj in [variable,prozedure] }
-        x.typ := tab[i].typ;
-        x.ref := tab[i].ref;
+x.typ := tab[i].typ;
+x.ref := tab[i].ref;
         if tab[i].normal
         then f := 0
         else f := 1;
@@ -2472,9 +1686,9 @@ procedure expression(fsys:symset; var x:item); forward;
       end { compoundstatement };
 
     procedure ifstatement;
-      var x : item;
+var x : item;
           lc1,lc2: integer;
-      begin
+begin
         insymbol;
         expression( fsys+[thensy,dosy],x);
         if not ( x.typ in [bools,notyp])
@@ -2493,26 +1707,26 @@ procedure expression(fsys:symset; var x:item); forward;
         then begin
                insymbol;
                lc2 := lc;
-               emit(10);
+emit(10);
                code[lc1].y := lc;
                statement(fsys);
                code[lc2].y := lc
              end
         else code[lc1].y := lc
-      end { ifstatement };
+end { ifstatement };
 
     procedure casestatement;
       var x : item;
-      i,j,k,lc1 : integer;
-      casetab : array[1..csmax]of
+i,j,k,lc1 : integer;
+casetab : array[1..csmax]of
                      packed record
                        val,lc : index
                      end;
-          exittab : array[1..csmax] of integer;
+        exittab : array[1..csmax] of integer;
 
-      procedure caselabel;
+procedure caselabel;
         var lab : conrec;
-         k : integer;
+k : integer;
         begin
           constant( fsys+[comma,colon],lab );
           if lab.tp <> x.typ
@@ -2521,10 +1735,10 @@ procedure expression(fsys:symset; var x:item); forward;
                then fatal(6)
                else begin
                       i := i+1;
-                       k := 0;
+k := 0;
                       casetab[i].val := lab.i;
                       casetab[i].lc := lc;
-                      repeat
+repeat
                         k := k+1
                       until casetab[k].val = lab.i;
                       if k < i
@@ -2546,9 +1760,9 @@ procedure expression(fsys:symset; var x:item); forward;
                  then insymbol
                  else error(5);
                  statement([semicolon,endsy]+fsys);
-                 j := j+1;
+j := j+1;
                  exittab[j] := lc;
-                 emit(10)
+emit(10)
                end
           end { onecase };
       begin  { casestatement  }
@@ -2557,10 +1771,10 @@ procedure expression(fsys:symset; var x:item); forward;
         j := 0;
         expression( fsys + [ofsy,comma,colon],x );
         if not( x.typ in [ints,bools,chars,notyp ])
-        then error(23);
+then error(23);
         lc1 := lc;
         emit(12); {jmpx}
-        if sy = ofsy
+if sy = ofsy
         then insymbol
         else error(8);
         onecase;
@@ -2577,8 +1791,8 @@ procedure expression(fsys:symset; var x:item); forward;
           end;
         emit1(10,0);
         for k := 1 to j do
-          code[exittab[k]].y := lc;
-        if sy = endsy
+code[exittab[k]].y := lc;
+if sy = endsy
         then insymbol
         else error(57)
       end { casestatement };
@@ -2616,22 +1830,22 @@ procedure expression(fsys:symset; var x:item); forward;
         lc1 := lc;
         expression( fsys+[dosy],x);
         if not( x.typ in [bools, notyp] )
-        then error(17);
+then error(17);
         lc2 := lc;
         emit(11);
-        if sy = dosy
+if sy = dosy
         then insymbol
         else error(54);
-        statement(fsys);
+statement(fsys);
         emit1(10,lc1);
         code[lc2].y := lc
-     end { whilestatement };
+end { whilestatement };
 
     procedure forstatement;
-      var   cvt : types;
-            x :  item;
-            i,f,lc1,lc2 : integer;
-     begin
+      var  cvt : types;
+x :  item;
+          i,f,lc1,lc2 : integer;
+begin
         insymbol;
         if sy = ident
         then begin
@@ -2644,8 +1858,8 @@ procedure expression(fsys:symset; var x:item); forward;
                            cvt := tab[i].typ;
                            if not tab[i].normal
                            then error(37)
-                    else emit2(0,tab[i].lev, tab[i].adr );
-                  if not ( cvt in [notyp, ints, bools, chars])
+else emit2(0,tab[i].lev, tab[i].adr );
+if not ( cvt in [notyp, ints, bools, chars])
                            then error(18)
                          end
                     else begin
@@ -2679,14 +1893,14 @@ procedure expression(fsys:symset; var x:item); forward;
         then insymbol
         else error(54);
         lc2 := lc;
-        statement(fsys);
+statement(fsys);
         emit1(f+1,lc2);
         code[lc1].y := lc
-     end { forstatement };
+end { forstatement };
 
     procedure standproc( n: integer );
       var i,f : integer;
-      x,y : item;
+x,y : item;
       begin
         case n of
           1,2 : begin { read }
@@ -2711,16 +1925,16 @@ procedure expression(fsys:symset; var x:item); forward;
                                               x.typ := tab[i].typ;
                                               x.ref := tab[i].ref;
                                               if tab[i].normal
-                                              then f := 0
+then f := 0
                                               else f := 1;
                                               emit2(f,tab[i].lev,tab[i].adr);
-                                              if sy in [lbrack,lparent,period]
+if sy in [lbrack,lparent,period]
                                               then selector( fsys+[comma,rparent],x);
                                               if x.typ in [ints,reals,chars,notyp]
-                                              then emit1(27,ord(x.typ))
-                                              else error(41)
-                                           end
-                               end;
+then emit1(27,ord(x.typ))
+else error(41)
+                                            end
+                                end;
                            test([comma,rparent],fsys,6);
                          until sy <> comma;
                          if sy = rparent
@@ -2742,14 +1956,14 @@ procedure expression(fsys:symset; var x:item); forward;
                                   insymbol
                                 end
                            else begin
-                                  expression(fsys+[comma,colon,rparent],x);
-                                  if not( x.typ in stantyps )
+expression(fsys+[comma,colon,rparent],x);
+if not( x.typ in stantyps )
                                   then error(41);
                                   if sy = colon
                                   then begin
-                                         insymbol;
+insymbol;
                                          expression( fsys+[comma,colon,rparent],y);
-                                         if y.typ <> ints
+if y.typ <> ints
                                          then error(43);
                                          if sy = colon
                                          then begin
@@ -2763,8 +1977,8 @@ procedure expression(fsys:symset; var x:item); forward;
                                               end
                                          else emit1(30,ord(x.typ))
                                        end
-                             else emit1(29,ord(x.typ))
-                           end
+else emit1(29,ord(x.typ))
+end
                          until sy <> comma;
                          if sy = rparent
                          then insymbol
@@ -2783,9 +1997,9 @@ procedure expression(fsys:symset; var x:item); forward;
                        insymbol;
                        if i <> 0
                        then case tab[i].obj of
-                              konstant,typel : error(45);
+konstant,typel : error(45);
                               vvariable:       assignment( tab[i].lev,tab[i].adr);
-                              prozedure:       if tab[i].lev <> 0
+prozedure:       if tab[i].lev <> 0
                                                then call(fsys,i)
                                                else standproc(tab[i].adr);
                               funktion:        if tab[i].ref = display[level]
@@ -2870,24 +2084,24 @@ procedure interpret;
   var ir : order ;         { instruction buffer }
       pc : integer;        { program counter }
       t  : integer;        { top stack index }
-      b  : integer;        { base index }
+b  : integer;        { base index }
       h1,h2,h3: integer;
       lncnt,ocnt,blkcnt,chrcnt: integer;     { counters }
       ps : ( run,fin,caschk,divchk,inxchk,stkchk,linchk,lngchk,redchk );
-           fld: array [1..4] of integer;  { default field widths }
-           display : array[0..lmax] of integer;
-           s  : array[1..stacksize] of   { blockmark:     }
+fld: array [1..4] of integer;  { default field widths }
+      display : array[0..lmax] of integer;
+      s  : array[1..stacksize] of   { blockmark:     }
             record
               case cn : types of        { s[b+0] = fct result }
                 ints : (i: integer );   { s[b+1] = return adr }
                 reals :(r: real );      { s[b+2] = static link }
                 bools :(b: boolean );   { s[b+3] = dynamic link }
                 chars :(c: char )       { s[b+4] = table index }
-            end;
+end;
 
   procedure dump;
     var p,h3 : integer;
-    begin
+begin
       h3 := tab[h2].lev;
       writeln(psout);
       writeln(psout);
@@ -2985,9 +2199,9 @@ begin
         10 : pc := ir.y ; { jump }
         11 : begin  { conditional jump }
                if not s[t].b
-               then pc := ir.y;
+then pc := ir.y;
                t := t - 1
-            end;
+end;
         12 : begin { switch }
                h1 := s[t].i;
                t := t-1;
@@ -3156,11 +2370,11 @@ begin
                t := t-1
              end;
         28 : begin   { write string }
-               h1 := s[t].i;
+h1 := s[t].i;
                h2 := ir.y;
                t := t-1;
                chrcnt := chrcnt+h1;
-               if chrcnt > lineleng
+if chrcnt > lineleng
                then ps := lngchk;
                repeat
                  write(prr,stab[h2]);
@@ -3375,12 +2589,12 @@ begin
       pc := pc+1;
       ocnt := ocnt+1;
       case ir.f div 10 of
-        0 : inter0;
+0 : inter0;
         1 : inter1;
         2 : inter2;
         3 : inter3;
         4 : inter4;
-        5 : inter5;
+5 : inter5;
         6 : inter6;
       end; { case }
     until ps <> run;
@@ -3547,8 +2761,8 @@ procedure enterids;
   end;
 
 
-begin  { main }    
-  setup;
+begin  { main }      
+setup;
   constbegsys := [ plus, minus, intcon, realcon, charcon, ident ];
   typebegsys := [ ident, arraysy, recordsy ];
   blockbegsys := [ constsy, typesy, varsy, procsy, funcsy, beginsy ];
@@ -3647,5 +2861,5 @@ begin  { main }
   writeln( psout );
   close( psout );
   close( prr )
-end.   
+end.
 ```
