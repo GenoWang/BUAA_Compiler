@@ -226,18 +226,18 @@ writeln( psout, 'compiler table for ', msg[n], ' is too small');
 procedure insymbol;  {reads next symbol}{*词法分析*}
 label 1,2,3;{*定义了三个标签*}
   var  i,j,k,e: integer;
-procedure readscale;
+procedure readscale;{*处理实数的指数部分，根据文法指数只能是整数*}
     var s,sign: integer;
     begin
       nextch;{*读取下一个字符*}
       sign := 1;{*读到的数的正负*}
       s := 0;{*计算读到的数字*}
-      if ch = '+'{*读到正好不处理，说明是简单表达式，继续读*}
+      if ch = '+'{*读到正号不处理，继续读*}
       then nextch
       else if ch = '-'
            then begin
                   nextch;
-                  sign := -1{*是个负数*}
+                  sign := -1{*设为负*}
                 end;
       if not(( ch >= '0' )and (ch <= '9' ))
       then error( 40 ){*如果接着的不是数字就报错*}
@@ -245,10 +245,10 @@ procedure readscale;
            s := 10*s + ord( ord(ch)-ord('0'));
            nextch;
            until not(( ch >= '0' ) and ( ch <= '9' ));{*计算读到的数的值，知道读到一个不是0到9的字符*}
-      e := s*sign + e{*带上符号*}
+      e := s*sign + e{*带上符号，e就是有符号的指数部分*}
     end { readscale };
 
-  procedure adjustscale;
+  procedure adjustscale;{*计算小数部分和指数*}
     var s : integer;
         d, t : real;
     begin
@@ -257,7 +257,7 @@ procedure readscale;
       else if k + e < emin
            then rnum := 0{*精度不够，直接置0*}
            else begin
-                  s := abs(e);
+                  s := abs(e);{*e是负数，求绝对值*}
                   t := 1.0;
                   d := 10.0;
                   repeat
@@ -340,13 +340,12 @@ end
         end;
       '0','1','2','3','4','5','6','7','8','9':{*开始识别无符号数*}
         begin { number }
-========================================================================
           k := 0;
           inum := 0;
-          sy := intcon;
+          sy := intcon;{*判断这个数为整数*}
 repeat
-            inum := inum * 10 + ord(ch) - ord('0');
-k := k + 1;
+            inum := inum * 10 + ord(ch) - ord('0');{*计算数值*}
+k := k + 1;{*统计整数部分的位数*}
             nextch
           until not (( ch >= '0' ) and ( ch <= '9' ));
           if( k > kmax ) or ( inum > nmax )
@@ -354,30 +353,30 @@ k := k + 1;
                  error(21);
                  inum := 0;
                  k := 0
-               end;
-          if ch = '.'
+               end;{*如果位数超标或者数值大小超标报错，置0*}
+          if ch = '.'{*读取小数部分*}
           then begin
                  nextch;
                  if ch = '.'
-                 then ch := ':'
+                 then ch := ':'{*连续两个.什么情况？试了一下运行会报错啊*}
                  else begin
-                        sy := realcon;
-                        rnum := inum;
+                        sy := realcon;{*判断这个数为实数*}
+                        rnum := inum;{*实数的整数部分就是之前得到的整数*}
                         e := 0;
                         while ( ch >= '0' ) and ( ch <= '9' ) do
 begin
                             e := e - 1;
                             rnum := 10.0 * rnum + (ord(ch) - ord('0'));
 nextch
-                          end;
+                          end;{*e记录小数位数（负数），小数部分先当作整数计算*}
                         if e = 0
-                        then error(40);
+                        then error(40);{*小数点之后没有数字，报错*}
                         if ch = 'e'
-                        then readscale;
-                        if e <> 0 then adjustscale
+                        then readscale;{*科学计数法，计算指数部分的整数值*}
+                        if e <> 0 then adjustscale{*计算最终的数值*}
                       end
                 end
-          else if ch = 'e'
+          else if ch = 'e'{整数接着科学计数法}
                then begin
 sy := realcon;
                       rnum := inum;
