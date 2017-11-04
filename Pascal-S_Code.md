@@ -261,17 +261,17 @@ procedure readscale;{*处理实数的指数部分，根据文法指数只能是�
                   t := 1.0;
                   d := 10.0;
                   repeat
-                    while not odd(s) do
+                    while not odd(s) do{*如果s不是偶数就重复*}
                       begin
                         s := s div 2;
-                        d := sqr(d)
-                      end;
+                        d := sqr(d){*d自己平方，从10变成100变成10000这样，减少了*10的运算次数*}
+                      end;{*先把偶数部分处理完*}
                     s := s - 1;
                     t := d * t
-                  until s = 0;
+                  until s = 0;{*此时t=10^e*}
 if e >= 0
-                  then rnum := rnum * t
-                  else rnum := rnum / t
+                  then rnum := rnum * t{*e大于0就乘，否则就除*}
+                  else rnum := rnum / t{*因为*10^e=/10^-e*}
 end
     end { adjustscale };
 
@@ -358,7 +358,7 @@ k := k + 1;{*统计整数部分的位数*}
           then begin
                  nextch;
                  if ch = '.'
-                 then ch := ':'{*连续两个.什么情况？试了一下运行会报错啊*}
+                 then ch := ':'{*连续两个.什么情况？没在文法里看到，试了一下运行会报错啊*}
                  else begin
                         sy := realcon;{*判断这个数为实数*}
                         rnum := inum;{*实数的整数部分就是之前得到的整数*}
@@ -386,53 +386,53 @@ readscale;
                       then adjustscale
                     end;
         end;
-      ':':
+      ':':{*如果读到的是：*}
         begin
           nextch;
           if ch = '='
           then begin
-                 sy := becomes;
+                 sy := becomes;{*读到的是赋值符号*}
                  nextch
                end
-          else  sy := colon
+          else  sy := colon{*否则就是个冒号*}
          end;
       '<':
         begin
           nextch;
           if ch = '='
           then begin
-                 sy := leq;
+                 sy := leq;{*小于等于*}
                  nextch
                end
           else
             if ch = '>'
             then begin
-                   sy := neq;
+                   sy := neq;{*不等于*}
                    nextch
                  end
-            else  sy := lss
+            else  sy := lss{*小于*}
         end;
       '>':
         begin
           nextch;
           if ch = '='
           then begin
-                 sy := geq;
+                 sy := geq;{*大于等于*}
                  nextch
                end
-          else  sy := gtr
+          else  sy := gtr{*大于*}
         end;
       '.':
         begin
           nextch;
           if ch = '.'
           then begin
-                 sy := colon;
+                 sy := colon;{*竟然把两个点当作冒号处理..神奇的操作*}
                  nextch
                end
-          else sy := period
+          else sy := period{*否则就是个句号*}
         end;
-      '''':
+      '''':{*两个连续的单引号，表示的是一个单引号字符*}
         begin
           k := 0;
    2:     nextch;
@@ -447,25 +447,25 @@ readscale;
           stab[sx+k] := ch;
           k := k + 1;
           if cc = 1
-          then begin { end of line }
+          then begin { end of line }{*行结束*}
                  k := 0;
                end
           else goto 2;
    3:     if k = 1
           then begin
-                 sy := charcon;
-                 inum := ord( stab[sx] )
+                 sy := charcon;{*双引号之间只有一个字符，那就是字符型*}
+                 inum := ord( stab[sx] ){*inum存储的是ascii值*}
                end
           else if k = 0
                then begin
                       error(38);
                       sy := charcon;
-                      inum := 0
+                      inum := 0{*双引号之间是空的报错*}
                     end
                else begin
-                      sy := stringcon;
+                      sy := stringcon;{*否则是字符串*}
                       inum := sx;
-                      sleng := k;
+                      sleng := k;{*字符串长度*}
                       sx := sx + k
                     end
         end;
@@ -473,15 +473,15 @@ readscale;
         begin
           nextch;
           if ch <> '*'
-          then sy := lparent
-          else begin { comment }
+          then sy := lparent{*不是注释符，是左括号*}
+          else begin { comment }{}{*是注释*}
                  nextch;
                  if ch = '$'
-                 then options;
+                 then options;{*是编译选项*}
                  repeat
                    while ch <> '*' do nextch;
                    nextch
-                 until ch = ')';
+                 until ch = ')';{*直到读到*)*}
                  nextch;
                  goto 1
                end
@@ -490,7 +490,7 @@ readscale;
         begin
           nextch;
           if ch = '$'
-          then options;
+          then options;{*处理编译选项*}
           while ch <> '}' do
             nextch;
           nextch;
@@ -498,19 +498,19 @@ readscale;
         end;
       '+', '-', '*', '/', ')', '=', ',', '[', ']', ';':
         begin
-          sy := sps[ch];
+          sy := sps[ch];{*直接处理*}
           nextch
         end;
       '$','"' ,'@', '?', '&', '^', '!':
         begin
-          error(24);
+          error(24);{*单独出现报错*}
           nextch;
           goto 1
         end
       end { case }
     end { insymbol };
 
-procedure enter(x0:alfa; x1:objecttyp; x2:types; x3:integer );
+procedure enter(x0:alfa; x1:objecttyp; x2:types; x3:integer );{*将系统预定义的标识符插入符号表中*}
   begin
     t := t + 1;    { enter standard identifier }
     with tab[t] do
@@ -526,18 +526,18 @@ procedure enter(x0:alfa; x1:objecttyp; x2:types; x3:integer );
       end
   end; { enter }
 
-procedure enterarray( tp: types; l,h: integer );
+procedure enterarray( tp: types; l,h: integer );{*将数组信息录入到数组信息向量表*}
   begin
-    if l > h
+    if l > h{*low>high，下界大于上界，报错*}
     then error(27);
     if( abs(l) > xmax ) or ( abs(h) > xmax )
     then begin
-           error(27);
+           error(27);{*上下界越界，报错*}
            l := 0;
            h := 0;
          end;
     if a = amax
-    then fatal(4)
+    then fatal(4){*表满了*}
     else begin
            a := a + 1;
            with atab[a] do
@@ -549,18 +549,18 @@ procedure enterarray( tp: types; l,h: integer );
          end
   end { enterarray };
 
-procedure enterblock;
+procedure enterblock;{*将分程序的信息录入到分程序索引表*}
   begin
-    if b = bmax
+    if b = bmax{*表满了*}
     then fatal(2)
     else begin
            b := b + 1;
-           btab[b].last := 0;
-           btab[b].lastpar := 0;
+           btab[b].last := 0;{*指向分程序中说明的最后一个标识符的位置*}
+           btab[b].lastpar := 0;{*指向过程或函数的最后一个参数在表中的位置*}
          end
   end { enterblock };
 
-procedure enterreal( x: real );
+procedure enterreal( x: real );{*信息录入到实常量表*}
   begin
     if c2 = c2max - 1
     then fatal(3)
@@ -574,7 +574,7 @@ procedure enterreal( x: real );
          end
   end { enterreal };
 
-procedure emit( fct: integer );
+procedure emit( fct: integer );{*这几个都是生成Pcode的函数，参数个数不同*}
   begin
     if lc = cmax
     then fatal(6);
@@ -607,12 +607,12 @@ procedure emit2( fct, a, b: integer );
     lc := lc + 1;
 end { emit2 };
 
-procedure printtables;
+procedure printtables;{*打印表*}
   var  i: integer;
 o: order;
       mne: array[0..omax] of
            packed array[1..5] of char;
-  begin
+  begin{*定义Pcode的指令助记符*}
     mne[0] := 'LDA  ';   mne[1] := 'LOD  ';  mne[2] := 'LDI  ';
 mne[3] := 'DIS  ';   mne[8] := 'FCT  ';  mne[9] := 'INT  ';
     mne[10] := 'JMP  ';   mne[11] := 'JPC  ';  mne[12] := 'SWT  ';
@@ -680,18 +680,18 @@ write( psout, mne[o.f]:8, o.f:5 );
   end { printtables };
 
 
-procedure block( fsys: symset; isfun: boolean; level: integer );
-  type conrec = record
+procedure block( fsys: symset; isfun: boolean; level: integer );{*分析处理分程序*}
+  type conrec = record{*定义一个记录变量，根据不同的type保存不同格式的数据*}
                   case tp: types of
                     ints, chars, bools : ( i:integer );
                     reals :( r:real )
                 end;
   var dx : integer ;  { data allocation index }
-      prt: integer ;  { t-index of this procedure }
-      prb: integer ;  { b-index of this procedure }
+      prt: integer ;  { t-index of this procedure }{*符号表索引*}
+      prb: integer ;  { b-index of this procedure }{*分程序表索引*}
 x  : integer ;
 
-  procedure skip( fsys:symset; n:integer);
+  procedure skip( fsys:symset; n:integer);{*跳过错误的代码*}
 begin
       error(n);
       skipflag := true;
@@ -700,11 +700,12 @@ begin
       if skipflag then endskip
     end { skip };
 
-  procedure test( s1,s2: symset; n:integer );
+  procedure test( s1,s2: symset; n:integer );{*检测当前的符号是否合法*}
     begin
       if not( sy in s1 )
       then skip( s1 + s2, n )
     end { test };
+========================================================================
 
   procedure testsemicolon;
     begin
