@@ -703,11 +703,10 @@ begin
   procedure test( s1,s2: symset; n:integer );{*检测当前的符号是否合法*}
     begin
       if not( sy in s1 )
-      then skip( s1 + s2, n )
+      then skip( s1 + s2, n ){*不合法就跳过*}
     end { test };
-========================================================================
 
-  procedure testsemicolon;
+  procedure testsemicolon;{*检测分号是否合法*}
     begin
       if sy = semicolon
       then insymbol
@@ -720,20 +719,20 @@ begin
     end { testsemicolon };
 
 
-  procedure enter( id: alfa; k:objecttyp );
+  procedure enter( id: alfa; k:objecttyp );{*将分程序的符号录入分程序表*}
     var j,l : integer;
     begin
       if t = tmax
-      then fatal(1)
+      then fatal(1){*表满了*}
       else begin
              tab[0].name := id;
-             j := btab[display[level]].last;
+             j := btab[display[level]].last;{*获取指向当前层次的最后一个标识符在符号表中的位置*}
              l := j;
              while tab[j].name <> id do
-               j := tab[j].link;
+               j := tab[j].link;{*按照id找位置*}
              if j <> 0
-             then error(1)
-             else begin
+             then error(1){*如果j不为0，说明找了这个定义，已经出现过一次，重复定义报错*}
+             else begin{*没有定义就可以录入*}
                     t := t + 1;
                     with tab[t] do
                       begin
@@ -746,12 +745,12 @@ begin
                         adr := 0;
                         normal := false { initial value }
                       end;
-                    btab[display[level]].last := t
+                    btab[display[level]].last := t{*更新当前层次最后一个标识符的位置*}
                   end
            end
     end { enter };
 
-  function loc( id: alfa ):integer;
+  function loc( id: alfa ):integer;{*定位标识符在符号表的位置*}
     var i,j : integer;        { locate if in table }
     begin
       i := level;
@@ -767,7 +766,7 @@ until ( i < 0 ) or ( j <> 0 );
       loc := j
     end { loc } ;
 
-  procedure entervariable;
+  procedure entervariable;{将变量信息录入表中}
     begin
       if sy = ident
       then begin
@@ -777,73 +776,73 @@ until ( i < 0 ) or ( j <> 0 );
       else error(2)
     end { entervariable };
 
-  procedure constant( fsys: symset; var c: conrec );
+  procedure constant( fsys: symset; var c: conrec );{*处理常量，常量的类型和值通过c返回*}
 var x, sign : integer;
     begin
       c.tp := notyp;
 c.i := 0;
       test( constbegsys, fsys, 50 );
-      if sy in constbegsys
+      if sy in constbegsys{*如果第一个符号是常量开始的符号*}
       then begin
              if sy = charcon
              then begin
                     c.tp := chars;
                     c.i := inum;
                     insymbol
-                  end
+                  end{*字符常量，记为字符型，存储ascii码值，继续读*}
              else begin
                   sign := 1;
                   if sy in [plus, minus]
                   then begin
                          if sy = minus
-                         then sign := -1;
+                         then sign := -1;{*如果是减号，符号变负，乘号为正*}
                          insymbol
                        end;
-                  if sy = ident
+                  if sy = ident{*如果是标识符*}
                   then begin
-                         x := loc(id);
+                         x := loc(id);{*找表中的位置*}
                          if x <> 0
                          then
                            if tab[x].obj <> konstant
-                           then error(25)
+                           then error(25){*找到了但不是常量，报错*}
                            else begin
                                   c.tp := tab[x].typ;
-                                  if c.tp = reals
+                                  if c.tp = reals{*如果是实数*}
                                   then c.r := sign*rconst[tab[x].adr]
-                                  else c.i := sign*tab[x].adr
+                                  else c.i := sign*tab[x].adr{*如果是整数*}
                                 end;
                          insymbol
                        end
-                  else if sy = intcon
+                  else if sy = intcon{*如果是整数*}
                        then begin
                               c.tp := ints;
                               c.i := sign*inum;
                               insymbol
                             end
-                       else if sy = realcon
+                       else if sy = realcon{*如果是实数*}
                             then begin
                                    c.tp := reals;
                                    c.r := sign*rnum;
                                    insymbol
                                  end
-                            else skip(fsys,50)
+                            else skip(fsys,50){*跳过无用的符号*}
                 end;
                 test(fsys,[],6)
            end
     end { constant };
 
-procedure typ( fsys: symset; var tp: types; var rf,sz:integer );
+procedure typ( fsys: symset; var tp: types; var rf,sz:integer );{*处理类型说明，返回当前关键词的类型，在符号表中的位置，以及占据的空间大小*}
     var eltp : types;
         elrf, x : integer;
 elsz, offset, t0, t1 : integer;
 
-procedure arraytyp( var aref, arsz: integer );
+procedure arraytyp( var aref, arsz: integer );{*处理数组类型*}
 var eltp : types;
       low, high : conrec;
       elrf, elsz: integer;
       begin
-        constant( [colon, rbrack, rparent, ofsy] + fsys, low );
-        if low.tp = reals
+        constant( [colon, rbrack, rparent, ofsy] + fsys, low );{*获取数组下标的下界*}
+        if low.tp = reals{*如果下界类型是实型，报错，设为整型*}
         then begin
                error(27);
                low.tp := ints;
@@ -852,34 +851,34 @@ var eltp : types;
         if sy = colon
         then insymbol
         else error(13);
-        constant( [rbrack, comma, rparent, ofsy ] + fsys, high );
-        if high.tp <> low.tp
+        constant( [rbrack, comma, rparent, ofsy ] + fsys, high );{*获取数组下标的上界*}
+        if high.tp <> low.tp{*上下界类型不一致报错*}
         then begin
                error(27);
-               high.i := low.i
+               high.i := low.i{*与下界相同*}
              end;
-        enterarray( low.tp, low.i, high.i );
+        enterarray( low.tp, low.i, high.i );{*录入*}
         aref := a;
-        if sy = comma
+        if sy = comma{*如果读到了逗号，说明要声明多维数组*}
         then begin
                insymbol;
                eltp := arrays;
-               arraytyp( elrf, elsz )
+               arraytyp( elrf, elsz ){*递归调用处理数组元素*}
              end
         else begin
-               if sy = rbrack
+               if sy = rbrack{*读到]，说明声明结束*}
                then insymbol
                else begin
-                      error(12);
-                      if sy = rparent
+                      error(12);{*缺少右中括号*}
+                      if sy = rparent{*右括号容错*}
                       then insymbol
                     end;
-               if sy = ofsy
+               if sy = ofsy{*读of关键字*}
                then insymbol
-               else error(8);
-               typ( fsys, eltp, elrf, elsz )
+               else error(8);{*没有of报错*}
+               typ( fsys, eltp, elrf, elsz ){*处理当前的符号类型*}
              end;
-             with atab[aref] do
+             with atab[aref] do{*记录当前数组的信息*}
                begin
                  arsz := (high-low+1) * elsz;
                  size := arsz;
@@ -888,69 +887,69 @@ var eltp : types;
                  elsize := elsz
                end
       end { arraytyp };
-    begin { typ  }
+    begin { typ  }{*类型的处理过程*}
       tp := notyp;
       rf := 0;
       sz := 0;
-      test( typebegsys, fsys, 10 );
-      if sy in typebegsys
+      test( typebegsys, fsys, 10 );{*判断当前符号是否是类型的开始符号，不是报10号错*}
+      if sy in typebegsys{*如果是则继续*}
       then begin
-             if sy = ident
+             if sy = ident{*如果当前符号是标识符*}
              then begin
-                    x := loc(id);
-                    if x <> 0
+                    x := loc(id);{*查找id在符号表的地址*}
+                    if x <> 0{*地址不为0说明找到了*}
                     then with tab[x] do
-                           if obj <> typel
+                           if obj <> typel{*如果找到了但是种类不是不是类型，报错*}
                            then error(29)
                            else begin
                                   tp := typ;
                                   rf := ref;
                                   sz := adr;
                                   if tp = notyp
-                                  then error(30)
+                                  then error(30){*如果没有定义类型就报错*}
                                 end;
                     insymbol
                   end
-             else if sy = arraysy
+             else if sy = arraysy{*如果当前是数组元素，即声明开始符号是array*}
                   then begin
                          insymbol;
-                         if sy = lbrack
+                         if sy = lbrack{*首先应该读到一个[*}
                          then insymbol
                          else begin
-                                error(11);
-                                if sy = lparent
+                                error(11);{*否则报错*}
+                                if sy = lparent{*如果是一个左括号，容错*}
                                 then insymbol
                               end;
-                         tp := arrays;
-                         arraytyp(rf,sz)
+                         tp := arrays;{*设置为数组类型*}
+                         arraytyp(rf,sz){*获取数组在数组信息向量表中的记录位置，和数组的大小*}
                          end
-             else begin { records }
+             else begin { records }{*由于typebesys中只有ident,arraysy,recordsy，所以这里只能是记录型*}
                     insymbol;
-                    enterblock;
-                    tp := records;
-                    rf := b;
+                    enterblock;{*当作分程序登记到分程序表*}
+                    tp := records;{*设置为记录型变量*}
+                    rf := b;{*rf指向在表中的位置*}
                     if level = lmax
-                    then fatal(5);
-                    level := level + 1;
-                    display[level] := b;
+                    then fatal(5);{*如果层次数达到最大了，报错终止程序*}
+                    level := level + 1;{*如果没有达到最大，层次数++*}
+                    display[level] := b;{*设置当前层次的display区，建立分层次索引*}
                     offset := 0;
-                    while not ( sy in fsys - [semicolon,comma,ident]+ [endsy] ) do
+                    while not ( sy in fsys - [semicolon,comma,ident]+ [endsy] ) do{*end之前都是记录变量中的变量*}
                       begin { field section }
-                        if sy = ident
+                        if sy = ident{*如果读到了一个标识符*}
                         then begin
-                               t0 := t;
-                               entervariable;
-                               while sy = comma do
+                               t0 := t;{*获取当前符号表指针的位置*}
+                               entervariable;{*将这个变量录入符号表*}
+                               while sy = comma do{*读到逗号说明还有同类型的变量，继续录入符号表*}
                                  begin
                                    insymbol;
                                    entervariable
                                  end;
-                               if sy = colon
+                               if sy = colon{*读到了冒号，说明变量名结束了，后面应该是变量的类型*}
                                then insymbol
-                               else error(5);
-                               t1 := t;
-                               typ( fsys + [semicolon, endsy, comma,ident], eltp, elrf, elsz );
-                               while t0 < t1 do
+                               else error(5);{没读到冒号报错}
+                               t1 := t;{*记录当前符号表栈顶的位置，由于此时录入的变量都没有填类型等信息，需要反填*}
+                               typ( fsys + [semicolon, endsy, comma,ident], eltp, elrf, elsz );{*处理记录变量各成员的类型说明*}
+                               while t0 < t1 do{*t0到t1之间的变量反填信息*}
                                begin
                                  t0 := t0 + 1;
                                  with tab[t0] do
@@ -959,33 +958,33 @@ var eltp : types;
                                      ref := elrf;
                                      normal := true;
                                      adr := offset;
-                                     offset := offset + elsz
+                                     offset := offset + elsz{*获得下一个变量的地址*}
                                    end
                                end
                              end; { sy = ident }
-                        if sy <> endsy
+                        if sy <> endsy{*如果没有读到end，说明还有其他成员，不过要先读分号*}
                         then begin
                                if sy = semicolon
-                               then insymbol
+                               then insymbol{*读到分号，继续读下一个成员，没有读到分号就报错*}
                                else begin
                                       error(14);
-                                      if sy = comma
+                                      if sy = comma{*如果错写成了逗号，容错*}
                                       then insymbol
                                     end;
-                                    test( [ident,endsy, semicolon],fsys,6 )
+                                    test( [ident,endsy, semicolon],fsys,6 ){*检验当前符号是否合法*}
                              end
                       end; { field section }
-                    btab[rf].vsize := offset;
+                    btab[rf].vsize := offset;{*offset记录了当前的局部变量，参数，和display区所占的空间总大小，记录在分程序表中*}
                     sz := offset;
-                    btab[rf].psize := 0;
+                    btab[rf].psize := 0;{*因为记录变量不是实际的分程序，所以参数占用的空间设置为0*}
                     insymbol;
-                    level := level - 1
+                    level := level - 1{*记录变量声明结束后层次-1*}
                   end; { record }
              test( fsys, [],6 )
            end;
       end { typ };
 
-  procedure parameterlist; { formal parameter list  }
+  procedure parameterlist; { formal parameter list  }{*处理过程或者函数声明中的形参表，将形参和有关信息登录到符号表中*}
     var tp : types;
         valpar : boolean;
         rf, sz, x, t0 : integer;
@@ -994,27 +993,27 @@ var eltp : types;
       tp := notyp;
       rf := 0;
       sz := 0;
-      test( [ident, varsy], fsys+[rparent], 7 );
-      while sy in [ident, varsy] do
+      test( [ident, varsy], fsys+[rparent], 7 );{*检测当前符号是否合法*}
+      while sy in [ident, varsy] do{*如果当前符号是标识符或者var关键字*}
         begin
           if sy <> varsy
-          then valpar := true
+          then valpar := true{*为啥？不是var关键字就设置是var？应该是if sy=varsy吧*}
           else begin
                  insymbol;
                  valpar := false
                end;
-          t0 := t;
-          entervariable;
-          while sy = comma do
+          t0 := t;{*记录当前符号表栈顶的位置*}
+          entervariable;{*将参数符号放入符号表*}
+          while sy = comma do{*如果有逗号，说明还有同类型的参数，继续录入到符号表*}
             begin
               insymbol;
               entervariable;
             end;
-          if sy = colon
+          if sy = colon{*读到冒号说明要声明类型*}
           then begin
                  insymbol;
                  if sy <> ident
-                 then error(2)
+                 then error(2){*不是标识符报错*}
                  else begin
                         x := loc(id);
                         insymbol;
@@ -1025,14 +1024,14 @@ var eltp : types;
                           else begin
                                  tp := typ;
                                  rf := ref;
-                                 if valpar
+                                 if valpar{*如果是值形参*}
                                  then sz := adr
                                  else sz := 1
                                end;
                       end;
                  test( [semicolon, rparent], [comma,ident]+fsys, 14 )
                  end
-          else error(5);
+          else error(5);{*不是分号报错*}
           while t0 < t do
             begin
               t0 := t0 + 1;
@@ -1044,11 +1043,11 @@ adr := dx;
                   lev := level;
                   normal := valpar;
 dx := dx + sz
-                end
+                end{*t0到t之间都是需要反填的*}
             end;
-            if sy <> rparent
+            if sy <> rparent{*如果不是右括号*}
             then begin
-                   if sy = semicolon
+                   if sy = semicolon{*如果是分号，说明还有参数*}
                    then insymbol
                    else begin
                           error(14);
@@ -1058,63 +1057,63 @@ dx := dx + sz
                         test( [ident, varsy],[rparent]+fsys,6)
                  end
         end { while };
-      if sy = rparent
+      if sy = rparent{*参数声明结束后用右括号结束*}
       then begin
              insymbol;
-             test( [semicolon, colon],fsys,6 )
+             test( [semicolon, colon],fsys,6 ){*应该用分号结束这一行，或者用冒号声明返回值类型，如果不是这两种就报错*}
            end
       else error(4)
     end { parameterlist };
 
 
-procedure constdec;
+procedure constdec;{*处理常量声明*}
     var c : conrec;
 begin
       insymbol;
       test([ident], blockbegsys, 2 );
       while sy = ident do
         begin
-          enter(id, konstant);
+          enter(id, konstant);{*入表*}
           insymbol;
           if sy = eql
           then insymbol
           else begin
                  error(16);
-                 if sy = becomes
+                 if sy = becomes{*容错*}
                  then insymbol
                end;
-          constant([semicolon,comma,ident]+fsys,c);
+          constant([semicolon,comma,ident]+fsys,c);{*调用分析程序，通过c返回类型和数值，并填表*}
           tab[t].typ := c.tp;
           tab[t].ref := 0;
-          if c.tp = reals
+          if c.tp = reals{*如果是实数*}
           then begin
 enterreal(c.r);
-                tab[t].adr := c1;
+                tab[t].adr := c1;{*在实常量表中的位置*}
 end
-          else tab[t].adr := c.i;
+          else tab[t].adr := c.i;{*如果是整型*}
           testsemicolon
         end
     end { constdec };
 
-  procedure typedeclaration;
+  procedure typedeclaration;{*处理类型声明*}
 var tp: types;
         rf, sz, t1 : integer;
 begin
       insymbol;
-      test([ident], blockbegsys,2 );
+      test([ident], blockbegsys,2 );{*检查是不是标识符*}
       while sy = ident do
         begin
-          enter(id, typel);
+          enter(id, typel);{*类型入表*}
           t1 := t;
           insymbol;
-          if sy = eql
+          if sy = eql{*读等号*}
           then insymbol
           else begin
                  error(16);
-                 if sy = becomes
+                 if sy = becomes{*如果是赋值符号容错*}
                  then insymbol
                end;
-          typ( [semicolon,comma,ident]+fsys, tp,rf,sz );
+          typ( [semicolon,comma,ident]+fsys, tp,rf,sz );{*获取类型变量的类型，在符号表中的位置，和占空间的大小*}
           with tab[t1] do
             begin
               typ := tp;
@@ -1125,7 +1124,7 @@ begin
         end
     end { typedeclaration };
 
-  procedure variabledeclaration;
+  procedure variabledeclaration;{*处理变量声明*}
 var tp : types;
         t0, t1, rf, sz : integer;
     begin
@@ -1133,17 +1132,17 @@ var tp : types;
 while sy = ident do
         begin
           t0 := t;
-          entervariable;
+          entervariable;{*如果是标识符，变量入表*}
           while sy = comma do
             begin
               insymbol;
               entervariable;
             end;
           if sy = colon
-          then insymbol
+          then insymbol{*读到冒号继续，否则报错*}
           else error(5);
           t1 := t;
-          typ([semicolon,comma,ident]+fsys, tp,rf,sz );
+          typ([semicolon,comma,ident]+fsys, tp,rf,sz );{*获取类型，地址，占用空间*}
           while t0 < t1 do
             begin
               t0 := t0 + 1;
@@ -1161,94 +1160,95 @@ while sy = ident do
         end
     end { variabledeclaration };
 
-  procedure procdeclaration;
+  procedure procdeclaration;{*处理过程声明*}
     var isfun : boolean;
     begin
-      isfun := sy = funcsy;
+      isfun := sy = funcsy;{*如果读到的符号是function，那么设置函数标志*}
       insymbol;
       if sy <> ident
       then begin
-             error(2);
+             error(2);{*不是标识符报错*}
              id :='          '
            end;
       if isfun
       then enter(id,funktion)
-      else enter(id,prozedure);
+      else enter(id,prozedure);{*根据是函数还是过程记录不同的信息到表中*}
       tab[t].normal := true;
       insymbol;
       block([semicolon]+fsys, isfun, level+1 );
       if sy = semicolon
       then insymbol
       else error(14);
-      emit(32+ord(isfun)) {exit}
+      emit(32+ord(isfun)) {exit}{*退出过程/函数*}
     end { proceduredeclaration };
 
 
 procedure statement( fsys:symset );
     var i : integer;
 
-procedure expression(fsys:symset; var x:item); forward;
-    procedure selector(fsys:symset; var v:item);
+procedure expression(fsys:symset; var x:item); forward;{*表达式处理子程序，通过x返回结果。forward使得selector能够调用expression*}
+    procedure selector(fsys:symset; var v:item);{*处理结构变量*}
     var x : item;
         a,j : integer;
-    begin { sy in [lparent, lbrack, period] }
+    begin { sy in [lparent, lbrack, period] }{*当前符号应该是左括号，或者左中括号，或者句号*}
       repeat
-        if sy = period
+        if sy = period{*如果当前符号是句号，开始处理后面的结构*}
         then begin
                insymbol; { field selector }
                if sy <> ident
-               then error(2)
+               then error(2){*不是标识符报错*}
                else begin
-                      if v.typ <> records
+                      if v.typ <> records{*如果不是记录类型报错*}
                       then error(31)
-                      else begin { search field identifier }
-                             j := btab[v.ref].last;
+                      else begin { search field identifier }{*在符号表中寻找类型标识符*}
+                             j := btab[v.ref].last;{*得到结构体在符号表中最后一个符号的位置*}
                              tab[0].name := id;
                              while tab[j].name <> id do
                                j := tab[j].link;
                              if j = 0
-                             then error(0);
+                             then error(0);{*在符号表中寻找当前符号，没找到就继续找，如果当前层次不存在这个符号报错*}
                              v.typ := tab[j].typ;
                              v.ref := tab[j].ref;
-                             a := tab[j].adr;
+                             a := tab[j].adr;{*记录这个成员变量相对于记录变量起始地址的位移*}
                              if a <> 0
                              then emit1(9,a)
                            end;
                       insymbol
                     end
              end
-        else begin { array selector }
+        else begin { array selector }{*处理数组下标*}
                if sy <> lbrack
-               then error(11);
+               then error(11);{*没有读到左中括号报错*}
                repeat
                  insymbol;
-                 expression( fsys+[comma,rbrack],x);
-                 if v.typ <> arrays
+                 expression( fsys+[comma,rbrack],x);{*递归调用表达式处理程序，将结果保存到x中*}
+                 if v.typ <> arrays{*如果传入的类型不是数组报错*}
                  then error(28)
                  else begin
-                        a := v.ref;
-                        if atab[a].inxtyp <> x.typ
+                        a := v.ref;{*得到数组在数组信息向量表的地址*}
+                        if atab[a].inxtyp <> x.typ{*如果数组下标和数组规定的类型不符，报错*}
                         then error(26)
-                        else if atab[a].elsize = 1
-                             then emit1(20,a)
-                             else emit1(21,a);
-                        v.typ := atab[a].eltyp;
-                        v.ref := atab[a].elref
+                        else if atab[a].elsize = 1{*如果是变量形参*}
+                             then emit1(20,a){*寻址*}
+                             else emit1(21,a);{*值形参也寻址*}
+                        v.typ := atab[a].eltyp;{*获得当前数组元素的类型*}
+                        v.ref := atab[a].elref{*和在数组信息向量表中的位置*}
                       end
-               until sy <> comma;
-               if sy = rbrack
+               until sy <> comma;{*如果不是逗号，说明还有*}
+               if sy = rbrack{*读取右中括号*}
                then insymbol
                else begin
                       error(12);
-                      if sy = rparent
+                      if sy = rparent{*读到右括号报错*}
                       then insymbol
                     end
              end
-      until not( sy in[lbrack, lparent, period]);
+      until not( sy in[lbrack, lparent, period]);{*直到读完所有的子结构*}
       test( fsys,[],6)
     end { selector };
 
-    procedure call( fsys: symset; i:integer );
+    procedure call( fsys: symset; i:integer );{*处理非标准的过程或函数调用*}
+    ==================================================================
 var x : item;
           lastp,cp,k : integer;
 begin
